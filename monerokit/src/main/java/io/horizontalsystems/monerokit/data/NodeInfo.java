@@ -187,7 +187,7 @@ public class NodeInfo extends Node {
     private Request rpcServiceRequest(int port) {
         final HttpUrl url = new HttpUrl.Builder()
                 .scheme("http")
-                .host(getHost())
+                .host(host)
                 .port(port)
                 .addPathSegment("json_rpc")
                 .build();

@@ -2,6 +2,7 @@ package io.horizontalsystems.monerokit
 
 import android.content.Context
 import android.util.Log
+import io.horizontalsystems.monerokit.data.NodeInfo
 import io.horizontalsystems.monerokit.data.TxData
 import io.horizontalsystems.monerokit.data.UserNotes
 import io.horizontalsystems.monerokit.model.NetworkType
@@ -29,15 +30,13 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 
 class MoneroKit(
+    private val context: Context,
     private val mnemonic: String,
     private val restoreHeight: Long,
     private val walletId: String,
     private val walletService: WalletService,
-    private val context: Context
+    private val node: String?
 ) : WalletService.Observer {
-
-    private val node = "nodex.monerujo.io:18081/mainnet/monerujo.io?rc=200?v=16&h=3458441&ts=1752868953&t=225.496692ms"
-    private val node2 = "xmr-node.cakewallet.com:18081/mainnet/cakewallet.com"
 
     private var scope: CoroutineScope? = null
 
@@ -85,12 +84,16 @@ class MoneroKit(
         scope?.launch {
             createWalletIfNotExists()
 
-            val nodes = NodeHelper.getOrPopulateFavourites()
-            val node = NodeHelper.autoselect(nodes)
+            val selectedNode = if (node != null) {
+                NodeInfo.fromString(node)
+            } else {
+                val nodes = NodeHelper.getOrPopulateFavourites()
+                NodeHelper.autoselect(nodes)
+            }
 
-            Log.e("eee", "selected node: ${node?.name}")
+            Log.e("eee", "selected node: ${selectedNode?.host}")
 
-            WalletManager.getInstance().setDaemon(node)
+            WalletManager.getInstance().setDaemon(selectedNode)
 
             walletService.setObserver(this@MoneroKit)
             val status = walletService.start(walletId, "")
@@ -328,7 +331,8 @@ class MoneroKit(
             words: List<String>,
             passphrase: String,
             restoreDateOrHeight: String,
-            walletId: String
+            walletId: String,
+            node: String?
         ): MoneroKit {
             val walletService = WalletService(context)
             val restoreHeight = getHeight(restoreDateOrHeight)
@@ -344,7 +348,7 @@ class MoneroKit(
 
             NetCipherHelper.createInstance(context)
 
-            return MoneroKit(moneroMnemonic, restoreHeight, walletId, walletService, context)
+            return MoneroKit(context, moneroMnemonic, restoreHeight, walletId, walletService, node)
         }
 
         fun validateAddress(address: String) {
@@ -365,15 +369,13 @@ class MoneroKit(
             if (walletManager.networkType == NetworkType.NetworkType_Mainnet) {
                 // Try parsing as date (yyyy-MM-dd)
                 height = runCatching {
-                    SimpleDateFormat("yyyy-MM-dd").apply { isLenient = false }
-                        .parse(trimmed)?.let { restoreHeight.getHeight(it) }
+                    SimpleDateFormat("yyyy-MM-dd").apply { isLenient = false }.parse(trimmed)?.let { restoreHeight.getHeight(it) }
                 }.getOrNull() ?: -1
 
                 // Try parsing as date (yyyyMMdd) if previous failed
                 if (height < 0 && trimmed.length == 8) {
                     height = runCatching {
-                        SimpleDateFormat("yyyyMMdd").apply { isLenient = false }
-                            .parse(trimmed)?.let { restoreHeight.getHeight(it) }
+                        SimpleDateFormat("yyyyMMdd").apply { isLenient = false }.parse(trimmed)?.let { restoreHeight.getHeight(it) }
                     }.getOrNull() ?: -1
                 }
             }

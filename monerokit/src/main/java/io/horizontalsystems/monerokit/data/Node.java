@@ -93,8 +93,7 @@ public class Node {
     @Getter
     final private NetworkType networkType;
     Address hostAddress;
-    @Getter
-    private String host;
+    public String host;
     @Getter
     @Setter
     int rpcPort = 0;
