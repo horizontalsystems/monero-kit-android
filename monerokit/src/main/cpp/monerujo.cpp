@@ -17,6 +17,7 @@
 #include <inttypes.h>
 #include "monerujo.h"
 #include "wallet2_api.h"
+#include <cassert>
 
 #ifdef __cplusplus
 extern "C"
