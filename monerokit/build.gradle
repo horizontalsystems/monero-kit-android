@@ -7,7 +7,7 @@ android {
     namespace 'io.horizontalsystems.monerokit'
     compileSdk 36
 
-    ndkVersion '29.0.13846066'
+    ndkVersion '23.1.7779620'
     defaultConfig {
         minSdk 27
 
