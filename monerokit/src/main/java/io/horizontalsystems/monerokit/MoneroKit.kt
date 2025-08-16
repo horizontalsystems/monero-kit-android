@@ -18,8 +18,11 @@ import io.horizontalsystems.monerokit.util.RestoreHeight
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -49,8 +52,8 @@ class MoneroKit(
     private val _balanceFlow = MutableStateFlow<Long>(0)
     val balanceFlow = _balanceFlow.asStateFlow()
 
-    private val _lastBlockUpdatedFlow = MutableStateFlow(Unit)
-    val lastBlockUpdatedFlow: StateFlow<Unit> = _lastBlockUpdatedFlow
+    private val _lastBlockUpdatedFlow = MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    val lastBlockUpdatedFlow = _lastBlockUpdatedFlow.asSharedFlow()
 
     private val _allTransactionsFlow = MutableStateFlow<List<TransactionInfo>>(emptyList())
     val allTransactionsFlow: StateFlow<List<TransactionInfo>> = _allTransactionsFlow
@@ -92,6 +95,11 @@ class MoneroKit(
             }
 
             Log.e("eee", "selected node: ${selectedNode?.host}")
+            if (selectedNode == null) {
+                started = false
+                _syncStateFlow.update { SyncState.NotSynced(SyncError.InvalidNode("Invalid node: $node")) }
+                return@launch
+            }
 
             WalletManager.getInstance().setDaemon(selectedNode)
 
@@ -99,6 +107,11 @@ class MoneroKit(
             val status = walletService.start(walletId, "")
 
             Log.e("eee", "status after start: $status")
+            if (status == null || !status.isOk) {
+                started = false
+                _syncStateFlow.update { SyncState.NotSynced(SyncError.StartError(status?.toString() ?: "Wallet is NULL")) }
+                return@launch
+            }
         }
     }
 
@@ -269,7 +282,7 @@ class MoneroKit(
             }
         }
 
-        _lastBlockUpdatedFlow.update { }
+        _lastBlockUpdatedFlow.tryEmit(Unit)
 
         _balanceFlow.update {
             walletService.getWallet()?.balance ?: 0L
@@ -313,13 +326,15 @@ class MoneroKit(
             throw IllegalStateException("Wallet recovery error: ${walletStatus.errorString}")
         }
         aWallet.close()
-        return walletStatus.isOk()
+        return walletStatus.isOk
     }
 
     sealed class SyncError : Error() {
         object NotStarted : SyncError() {
             override val message = "Not Started"
         }
+        data class InvalidNode(override val message: String) : SyncError()
+        data class StartError(override val message: String) : SyncError()
     }
 
     companion object {
