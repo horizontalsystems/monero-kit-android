@@ -291,6 +291,14 @@ class MoneroKit(
         return true
     }
 
+    override fun onInitialTransactions(txs: List<TransactionInfo?>?) {
+        txs?.let {
+            _allTransactionsFlow.update {
+                txs.mapNotNull { it }
+            }
+        }
+    }
+
     override fun onProgress(n: Int) {
         Log.e("eee", "observer.onProgress()\n - n: $n")
     }

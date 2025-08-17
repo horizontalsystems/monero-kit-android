@@ -16,7 +16,6 @@
 
 package io.horizontalsystems.monerokit.model;
 
-//import com.m2049r.xmrwallet.XmrWalletApplication;
 import io.horizontalsystems.monerokit.data.Node;
 import io.horizontalsystems.monerokit.util.RestoreHeight;
 

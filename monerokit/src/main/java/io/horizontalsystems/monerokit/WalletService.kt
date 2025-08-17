@@ -1,8 +1,10 @@
 package io.horizontalsystems.monerokit
 
 import android.content.Context
+import android.util.Log
 import io.horizontalsystems.monerokit.data.TxData
 import io.horizontalsystems.monerokit.model.PendingTransaction
+import io.horizontalsystems.monerokit.model.TransactionInfo
 import io.horizontalsystems.monerokit.model.Wallet
 import io.horizontalsystems.monerokit.model.WalletListener
 import io.horizontalsystems.monerokit.model.WalletManager
@@ -34,6 +36,7 @@ class WalletService(private val context: Context) {
         fun onSendTransactionFailed(error: String)
         fun onWalletStarted(walletStatus: Wallet.Status?)
         fun onWalletOpen(device: Wallet.Device)
+        fun onInitialTransactions(txs: List<TransactionInfo?>?)
     }
 
     fun setObserver(obs: Observer?) {
@@ -67,6 +70,10 @@ class WalletService(private val context: Context) {
                 }
                 listener = MyWalletListener().apply { start() }
                 showProgress(100)
+
+                wallet.refreshHistory()
+                Log.e("eee", "+++++ history in start: ${wallet.history.all.size}")
+                observer?.onInitialTransactions(wallet.history.all)
             }
             showProgress(101)
             // if we try to refresh the history here we get occasional segfaults!
