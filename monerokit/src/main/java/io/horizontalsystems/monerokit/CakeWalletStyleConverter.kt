@@ -255,7 +255,7 @@ object CakeWalletStyleConverter {
             val privateKey = hdWallet.privateKey("m/44'/128'/$accountIndex'/0/0").privKey
 
             // Step 3: Reduce private key with Ed25519 curve order (Cake Wallet approach)
-            val spendKey = reduceECKey(privateKey.toByteArray())
+            val spendKey = reduceECKey(privateKey.toByteArray32())
 
             // Step 4: Encode as Monero legacy mnemonic
             encodeMoneroMnemonic(spendKey)
@@ -263,6 +263,16 @@ object CakeWalletStyleConverter {
         } catch (e: Exception) {
             e.printStackTrace()
             null
+        }
+    }
+
+    fun BigInteger.toByteArray32(): ByteArray {
+        val bytes = this.toByteArray()
+        return when {
+            bytes.size == 32 -> bytes
+            bytes.size == 33 && bytes[0] == 0.toByte() -> bytes.sliceArray(1..32)
+            bytes.size < 32 -> ByteArray(32 - bytes.size) + bytes
+            else -> throw IllegalArgumentException("BigInteger exceeds 32 bytes: ${bytes.size}")
         }
     }
 
