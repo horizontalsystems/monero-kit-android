@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.horizontalsystems.monerokit.SyncState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
 
@@ -19,7 +20,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var totalBalance: BigDecimal? = null
 
-    var address: String = ""
+    private var address: String = ""
 
     private val decimal = 12
 
@@ -27,6 +28,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         MainUiState(
             syncState = syncState,
             totalBalance = totalBalance,
+            address = address,
         )
     )
         private set
@@ -74,12 +76,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             uiState = MainUiState(
                 syncState = syncState,
                 totalBalance = totalBalance,
+                address = address,
             )
         }
     }
 
     fun start() {
         kit.start()
+
+        viewModelScope.launch(Dispatchers.Default) {
+            while (kit.receiveAddress.isEmpty()) {
+                delay(100)
+                address = kit.receiveAddress.ifBlank({ "Loading.." })
+                emitState()
+            }
+        }
     }
 
     fun stop() {
@@ -90,4 +101,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 data class MainUiState(
     val syncState: SyncState,
     val totalBalance: BigDecimal?,
+    val address: String,
 )

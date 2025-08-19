@@ -47,11 +47,11 @@ fun MainScreen(navController: NavHostController) {
                 when (it) {
                     Page.Balance -> BalanceScreen(viewModel, uiState, navController)
                     Page.Transactions -> {
-//                        TransactionsScreen()
+                        TransactionsScreen()
                     }
 
                     Page.Send -> {
-//                        SendScreen(StellarAsset.Native)
+                        SendScreen()
                     }
                 }
             }

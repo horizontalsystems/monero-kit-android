@@ -15,11 +15,10 @@ import androidx.navigation.NavHostController
 
 @Composable
 fun BalanceScreen(viewModel: MainViewModel, uiState: MainUiState, navController: NavHostController) {
-    val address = viewModel.address
 
     SelectionContainer {
         Column {
-            Text(text = "Address: $address")
+            Text(text = "Address: ${uiState.address}")
             Text(text = "Balance: ${uiState.totalBalance}")
             Text(text = "Sync State: ${uiState.syncState}")
 
