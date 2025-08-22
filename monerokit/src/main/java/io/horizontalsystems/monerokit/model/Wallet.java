@@ -24,6 +24,7 @@ import java.util.Locale;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+
 import io.horizontalsystems.monerokit.data.Subaddress;
 import io.horizontalsystems.monerokit.data.TxData;
 import lombok.Getter;
@@ -171,12 +172,15 @@ public class Wallet {
     public Subaddress getSubaddressObject(int subAddressIndex) {
         Subaddress subaddress = getSubaddressObject(accountIndex, subAddressIndex);
         long amount = 0;
+        long txsCount = 0;
         for (TransactionInfo info : getHistory().getAll()) {
             if ((info.addressIndex == subAddressIndex) && (info.direction == TransactionInfo.Direction.Direction_In)) {
                 amount += info.amount;
+                txsCount++;
             }
         }
         subaddress.setAmount(amount);
+        subaddress.setTxsCount(txsCount);
         return subaddress;
     }
 

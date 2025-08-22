@@ -3,6 +3,7 @@ package io.horizontalsystems.monerokit
 import android.content.Context
 import android.util.Log
 import io.horizontalsystems.monerokit.data.NodeInfo
+import io.horizontalsystems.monerokit.data.Subaddress
 import io.horizontalsystems.monerokit.data.TxData
 import io.horizontalsystems.monerokit.data.UserNotes
 import io.horizontalsystems.monerokit.model.NetworkType
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -155,6 +157,17 @@ class MoneroKit(
         val txData = buildTxData(amount, address, memo)
 
         return wallet.estimateTransactionFee(txData)
+    }
+
+    fun getSubaddresses(): List<Subaddress> {
+        val wallet = walletService.getWallet() ?: return emptyList()
+        val list = mutableListOf<Subaddress>()
+        for (i in 0..<wallet.numSubaddresses) {
+            wallet.getSubaddressObject(i)?.let {
+                list.add(it)
+            }
+        }
+        return list
     }
 
     private fun buildTxData(
@@ -341,6 +354,7 @@ class MoneroKit(
         object NotStarted : SyncError() {
             override val message = "Not Started"
         }
+
         data class InvalidNode(override val message: String) : SyncError()
         data class StartError(override val message: String) : SyncError()
     }
