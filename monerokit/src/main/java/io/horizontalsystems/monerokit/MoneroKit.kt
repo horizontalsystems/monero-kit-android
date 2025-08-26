@@ -170,6 +170,17 @@ class MoneroKit(
         return list
     }
 
+    fun getKeys(): Keys? {
+        val wallet = walletService.getWallet() ?: return null
+
+        return Keys(
+            privateSpendingKey = wallet.secretSpendKey,
+            publicSpendingKey = wallet.publicSpendKey,
+            privateViewKey = wallet.secretViewKey,
+            publicViewKey = wallet.publicViewKey
+        )
+    }
+
     private fun buildTxData(
         amount: Long,
         destination: String,
@@ -439,3 +450,10 @@ fun ByteArray?.toHexString(): String {
     val rawHex = this?.toRawHexString() ?: return ""
     return "0x$rawHex"
 }
+
+data class Keys(
+    val privateSpendingKey: String,
+    val publicSpendingKey: String,
+    val privateViewKey: String,
+    val publicViewKey: String
+)

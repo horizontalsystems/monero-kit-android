@@ -201,6 +201,10 @@ public class Wallet {
 
     public native String getSecretSpendKey();
 
+    public native String getPublicViewKey();
+
+    public native String getPublicSpendKey();
+
     public boolean store() {
         return store("");
     }

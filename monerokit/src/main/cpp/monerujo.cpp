@@ -688,6 +688,18 @@ Java_io_horizontalsystems_monerokit_model_Wallet_getSecretSpendKey(JNIEnv *env, 
     return env->NewStringUTF(wallet->secretSpendKey().c_str());
 }
 
+JNIEXPORT jstring JNICALL
+Java_io_horizontalsystems_monerokit_model_Wallet_getPublicViewKey(JNIEnv *env, jobject instance) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    return env->NewStringUTF(wallet->publicViewKey().c_str());
+}
+
+JNIEXPORT jstring JNICALL
+Java_io_horizontalsystems_monerokit_model_Wallet_getPublicSpendKey(JNIEnv *env, jobject instance) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    return env->NewStringUTF(wallet->publicSpendKey().c_str());
+}
+
 JNIEXPORT jboolean JNICALL
 Java_io_horizontalsystems_monerokit_model_Wallet_store(JNIEnv *env, jobject instance,
                                              jstring path) {
