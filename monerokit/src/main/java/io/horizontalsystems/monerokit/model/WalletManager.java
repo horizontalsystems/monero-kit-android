@@ -338,5 +338,21 @@ public class WalletManager {
 
     static public native String moneroVersion();
 
-    static public native String generateKey(String seed, String seed_offset, boolean private_key, boolean spend_key);
+    static private native String generateKey(String seed, String seed_offset, boolean private_key, boolean spend_key);
+
+    static public String getPrivateSpendKey(String mnemonic, String passphrase) {
+        return generateKey(mnemonic, passphrase, true, true);
+    }
+
+    static public String getPublicSpendKey(String mnemonic, String passphrase) {
+        return generateKey(mnemonic, passphrase, false, true);
+    }
+
+    static public String getPrivateViewKey(String mnemonic, String passphrase) {
+        return generateKey(mnemonic, passphrase, true, false);
+    }
+
+    static public String getPublicViewKey(String mnemonic, String passphrase) {
+        return generateKey(mnemonic, passphrase, false, false);
+    }
 }

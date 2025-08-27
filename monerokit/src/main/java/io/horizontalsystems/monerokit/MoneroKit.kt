@@ -2,6 +2,7 @@ package io.horizontalsystems.monerokit
 
 import android.content.Context
 import android.util.Log
+import io.horizontalsystems.monerokit.MoneroKit.Companion.MONERO_LEGACY_MNEMONIC_COUNT
 import io.horizontalsystems.monerokit.data.NodeInfo
 import io.horizontalsystems.monerokit.data.Subaddress
 import io.horizontalsystems.monerokit.data.TxData
@@ -25,7 +26,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -36,7 +36,7 @@ import java.util.Calendar
 
 class MoneroKit(
     private val context: Context,
-    private val mnemonic: String,
+    private val seed: Seed.Electrum,
     private val restoreHeight: Long,
     private val walletId: String,
     private val walletService: WalletService,
@@ -174,8 +174,8 @@ class MoneroKit(
         val wallet = walletService.getWallet() ?: return null
 
         return Keys(
-            privateSpendingKey = wallet.secretSpendKey,
-            publicSpendingKey = wallet.publicSpendKey,
+            privateSpendKey = wallet.secretSpendKey,
+            publicSpendKey = wallet.publicSpendKey,
             privateViewKey = wallet.secretViewKey,
             publicViewKey = wallet.publicViewKey
         )
@@ -232,7 +232,8 @@ class MoneroKit(
 
         val newWalletFile = File(walletFolder, walletId)
         val walletPassword = ""
-        val offset = ""
+        val offset = seed.passphrase
+        val mnemonic = seed.mnemonic.joinToString(" ")
         val newWallet = WalletManager.getInstance().recoveryWallet(newWalletFile, walletPassword, mnemonic, offset, restoreHeight)
         val success = checkAndCloseWallet(newWallet)
 
@@ -376,8 +377,7 @@ class MoneroKit(
 
         fun getInstance(
             context: Context,
-            words: List<String>,
-            passphrase: String,
+            seed: Seed,
             restoreDateOrHeight: String,
             walletId: String,
             node: String?
@@ -387,22 +387,28 @@ class MoneroKit(
 
             Log.e("eee", "computed restoreHeight = $restoreHeight")
 
-            val moneroMnemonic = if (words.size != MONERO_LEGACY_MNEMONIC_COUNT) {
-                CakeWalletStyleConverter.getLegacySeedFromBip39(words, passphrase)
-                    ?: throw IllegalArgumentException("BIP39 mnemonic can't be converted to Monero Legacy Mnemonic")
-            } else {
-                words.joinToString(" ")
-            }
-
             NetCipherHelper.createInstance(context)
 
-            return MoneroKit(context, moneroMnemonic, restoreHeight, walletId, walletService, node)
+            return MoneroKit(context, seed.toElectrum(), restoreHeight, walletId, walletService, node)
         }
 
         fun validateAddress(address: String) {
             if (!Wallet.isAddressValid(address)) {
                 throw IllegalArgumentException("Invalid address")
             }
+        }
+
+        fun getKeys(seed: Seed): Keys {
+            val electrumSeed = seed.toElectrum()
+            val mnemonic = electrumSeed.mnemonic.joinToString(" ")
+            val passphrase = electrumSeed.passphrase
+
+            val privateSpendKey = WalletManager.getPrivateSpendKey(mnemonic, passphrase)
+            val publicSpendKey = WalletManager.getPublicSpendKey(mnemonic, passphrase)
+            val privateViewKey = WalletManager.getPrivateViewKey(mnemonic, passphrase)
+            val publicViewKey = WalletManager.getPublicViewKey(mnemonic, passphrase)
+
+            return Keys(privateSpendKey, publicSpendKey, privateViewKey, publicViewKey)
         }
 
         private fun getHeight(input: String): Long {
@@ -452,8 +458,32 @@ fun ByteArray?.toHexString(): String {
 }
 
 data class Keys(
-    val privateSpendingKey: String,
-    val publicSpendingKey: String,
+    val privateSpendKey: String,
+    val publicSpendKey: String,
     val privateViewKey: String,
     val publicViewKey: String
 )
+
+sealed class Seed {
+    data class Electrum(val mnemonic: List<String>, val passphrase: String) : Seed() {
+        init {
+            check(mnemonic.size == MONERO_LEGACY_MNEMONIC_COUNT) { "Illegal Electrum Seed" }
+        }
+    }
+
+    data class Bip39(val mnemonic: List<String>, val passphrase: String) : Seed() {
+        init {
+            check(mnemonic.size in listOf(12, 18, 24)) { "Illegal Bip39 Seed" }
+        }
+    }
+}
+
+fun Seed.toElectrum() = when (this) {
+    is Seed.Bip39 -> {
+        val moneroMnemonic = CakeWalletStyleConverter.getLegacySeedFromBip39(mnemonic, passphrase)
+            ?: throw IllegalArgumentException("BIP39 mnemonic can't be converted to Monero Legacy Mnemonic")
+        Seed.Electrum(moneroMnemonic, "")
+    }
+
+    is Seed.Electrum -> this
+}

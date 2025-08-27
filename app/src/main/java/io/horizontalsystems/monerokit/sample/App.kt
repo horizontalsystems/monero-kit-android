@@ -2,6 +2,7 @@ package io.horizontalsystems.monerokit.sample
 
 import android.app.Application
 import io.horizontalsystems.monerokit.MoneroKit
+import io.horizontalsystems.monerokit.Seed
 import io.horizontalsystems.monerokit.data.DefaultNodes
 import timber.log.Timber
 
@@ -31,8 +32,7 @@ class App : Application() {
 
         kit = MoneroKit.getInstance(
             context = this,
-            words = "".split(" "),
-            passphrase = "",
+            seed = Seed.Bip39("".split(" "), ""),
             restoreDateOrHeight = "3438000",
             walletId = "wallet_id_111",
             node = DefaultNodes.BOLDSUCK.uri

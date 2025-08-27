@@ -243,7 +243,7 @@ object CakeWalletStyleConverter {
         bip39Mnemonic: List<String>,
         passphrase: String = "",
         accountIndex: Int = 0
-    ): String? {
+    ): List<String>? {
         return try {
             if (bip39Mnemonic.size !in listOf(12, 18, 24)) return null
 
@@ -315,7 +315,7 @@ object CakeWalletStyleConverter {
     /**
      * Encode Monero mnemonic from spend key (following Monero's algorithm)
      */
-    private fun encodeMoneroMnemonic(spendKey: ByteArray): String {
+    private fun encodeMoneroMnemonic(spendKey: ByteArray): List<String> {
         if (spendKey.size != 32) {
             throw IllegalArgumentException("Spend key must be 32 bytes")
         }
@@ -357,7 +357,7 @@ object CakeWalletStyleConverter {
         val checksumWordIndex = (checksum % 24).toInt()
         words.add(words[checksumWordIndex])
 
-        return words.joinToString(" ")
+        return words
     }
 
 }
