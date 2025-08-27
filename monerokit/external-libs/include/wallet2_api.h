@@ -741,6 +741,7 @@ struct Wallet
     static void info(const std::string &category, const std::string &str);
     static void warning(const std::string &category, const std::string &str);
     static void error(const std::string &category, const std::string &str);
+    static std::string generateKey(const std::string &seed, const std::string &seed_offset, const bool privateKey, const bool spendKey);
 
    /**
     * @brief StartRefresh - Start/resume refresh thread (refresh every 10 seconds)

@@ -337,4 +337,6 @@ public class WalletManager {
     static public native void logError(String category, String message);
 
     static public native String moneroVersion();
+
+    static public native String generateKey(String seed, String seed_offset, boolean private_key, boolean spend_key);
 }

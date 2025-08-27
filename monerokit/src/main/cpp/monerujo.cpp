@@ -1607,6 +1607,19 @@ Java_io_horizontalsystems_monerokit_model_WalletManager_moneroVersion(JNIEnv *en
     return env->NewStringUTF(MONERO_VERSION);
 }
 
+JNIEXPORT jstring JNICALL
+Java_io_horizontalsystems_monerokit_model_WalletManager_generateKey(JNIEnv *env, jclass clazz, jstring seed, jstring seed_offset, jboolean private_key, jboolean spend_key) {
+    const char *_seed = env->GetStringUTFChars(seed, nullptr);
+    const char *_seed_offset = env->GetStringUTFChars(seed_offset, nullptr);
+
+    std::string key = Monero::Wallet::generateKey(_seed, _seed_offset, private_key, spend_key);
+
+    env->ReleaseStringUTFChars(seed, _seed);
+    env->ReleaseStringUTFChars(seed_offset, _seed_offset);
+
+    return env->NewStringUTF(key.c_str());
+}
+
 //
 // Ledger Stuff
 //
