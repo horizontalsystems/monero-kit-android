@@ -170,6 +170,10 @@ class MoneroKit(
         return list
     }
 
+    fun getSubaddress(accountIndex: Int, subaddressIndex: Int): Subaddress? {
+        return walletService.getWallet()?.getSubaddressObject(accountIndex, subaddressIndex)
+    }
+
     fun getKeys(): Keys? {
         val wallet = walletService.getWallet() ?: return null
 
