@@ -60,6 +60,8 @@ class MoneroKit(
     private val _allTransactionsFlow = MutableStateFlow<List<TransactionInfo>>(emptyList())
     val allTransactionsFlow: StateFlow<List<TransactionInfo>> = _allTransactionsFlow
 
+    private var nodeInfo: NodeInfo? = null
+
     val receiveAddress: String
         get() = try {
             walletService.getWallet()?.address ?: throw IllegalStateException("Wallet is NULL")
@@ -89,7 +91,9 @@ class MoneroKit(
         scope?.launch {
             createWalletIfNotExists()
 
-            val selectedNode = if (node != null) {
+            val selectedNode = if (nodeInfo != null) {
+                nodeInfo
+            } else if (node != null) {
                 NodeInfo.fromString(node)
             } else {
                 val nodes = NodeHelper.getOrPopulateFavourites()
@@ -99,10 +103,11 @@ class MoneroKit(
             Log.e("eee", "selected node: ${selectedNode?.host}")
             if (selectedNode == null) {
                 started = false
-                _syncStateFlow.update { SyncState.NotSynced(SyncError.InvalidNode("Invalid node: $node")) }
+                _syncStateFlow.update { SyncState.NotSynced(SyncError.InvalidNode("Invalid node")) }
                 return@launch
             }
 
+            nodeInfo = selectedNode
             WalletManager.getInstance().setDaemon(selectedNode)
 
             walletService.setObserver(this@MoneroKit)
@@ -356,7 +361,7 @@ class MoneroKit(
         Log.e("eee", "observer.onWalletOpen()\n - device: $device")
     }
 
-    fun checkAndCloseWallet(aWallet: Wallet): Boolean {
+    private fun checkAndCloseWallet(aWallet: Wallet): Boolean {
         val walletStatus = aWallet.status
         if (!walletStatus.isOk) {
             Timber.tag("eee").e(walletStatus.errorString)
@@ -364,6 +369,21 @@ class MoneroKit(
         }
         aWallet.close()
         return walletStatus.isOk
+    }
+
+    fun statusInfo(): Map<String, Any> {
+        val statusInfo = LinkedHashMap<String, Any>()
+
+        statusInfo["Wallet Status"] = walletService.getWallet()?.fullStatus ?: "NULL"
+        statusInfo["Last Block Height"] = lastBlockHeight ?: 0L
+        statusInfo["Sync State"] = _syncStateFlow.value
+        statusInfo["Daemon Height"] = walletService.getDaemonHeight()
+        statusInfo["Connection Status"] = walletService.getConnectionStatus()
+        statusInfo["Kit started"] = started
+        statusInfo["Service running"] = WalletService.running
+        statusInfo["Node"] = nodeInfo?.name ?: "NULL"
+
+        return statusInfo
     }
 
     sealed class SyncError : Error() {
