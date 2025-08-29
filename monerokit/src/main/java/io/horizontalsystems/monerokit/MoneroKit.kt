@@ -64,7 +64,7 @@ class MoneroKit(
 
     val receiveAddress: String
         get() = try {
-            walletService.getWallet()?.address ?: throw IllegalStateException("Wallet is NULL")
+            walletService.getWallet()?.newSubaddress ?: throw IllegalStateException("Wallet is NULL")
         } catch (_: Exception) {
             ""
         }
@@ -167,7 +167,7 @@ class MoneroKit(
     fun getSubaddresses(): List<Subaddress> {
         val wallet = walletService.getWallet() ?: return emptyList()
         val list = mutableListOf<Subaddress>()
-        for (i in 0..<wallet.numSubaddresses) {
+        for (i in 0..wallet.numSubaddresses) {
             wallet.getSubaddressObject(i)?.let {
                 list.add(it)
             }
