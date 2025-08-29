@@ -64,7 +64,13 @@ class MoneroKit(
 
     val receiveAddress: String
         get() = try {
-            walletService.getWallet()?.newSubaddress ?: throw IllegalStateException("Wallet is NULL")
+            val allAddresses = getSubaddresses()
+            if (allAddresses.isEmpty()) {
+                ""
+            } else {
+                val lastUnusedSubaddress = allAddresses.drop(1).lastOrNull { it.txsCount == 0L }
+                lastUnusedSubaddress?.address ?: walletService.getWallet()?.newSubaddress ?: ""
+            }
         } catch (_: Exception) {
             ""
         }
