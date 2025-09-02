@@ -210,25 +210,6 @@ class MoneroKit(
         }
     }
 
-
-    suspend fun restoreHeightForNewWallet(): Long {
-        // val currentNode: NodeInfo? = getNode() //
-        // get it from the connected node if we have one
-
-        val height: Long = -1 // if (currentNode != null) currentNode.getHeight() else -1
-
-        val restoreHeight: Long = if (height > -1) height
-        else {
-            // Go back 4 days if we don't have a precise restore height
-            val restoreDate = Calendar.getInstance()
-            restoreDate.add(Calendar.DAY_OF_MONTH, -4)
-
-            RestoreHeight.getInstance().getHeight(restoreDate.getTime())
-        }
-
-        return restoreHeight
-    }
-
     private suspend fun createWalletIfNotExists() = withContext(Dispatchers.IO) {
         // check if the wallet we want to create already exists
         val walletFolder: File = Helper.getWalletRoot(context)
@@ -439,6 +420,10 @@ class MoneroKit(
             val publicViewKey = WalletManager.getPublicViewKey(mnemonic, passphrase)
 
             return Keys(privateSpendKey, publicSpendKey, privateViewKey, publicViewKey)
+        }
+
+        fun restoreHeightForNewWallet(): Long {
+            return RestoreHeight.getInstance().getHeight(Calendar.getInstance().getTime())
         }
 
         private fun getHeight(input: String): Long {
