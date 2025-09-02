@@ -87,35 +87,6 @@ public class WalletManager {
         managedWallet = null;
     }
 
-    public Wallet createWallet(File aFile, String password, String language, long height) {
-        long walletHandle = createWalletJ(aFile.getAbsolutePath(), password, language, getNetworkType().getValue());
-        Wallet wallet = new Wallet(walletHandle);
-        manageWallet(wallet);
-        if (wallet.getStatus().isOk() && (wallet.getNetworkType() == NetworkType.NetworkType_Mainnet)) {
-            // (Re-)Estimate restore height based on what we know
-            final long oldHeight = wallet.getRestoreHeight();
-            // Go back 4 days if we don't have a precise restore height
-            Calendar restoreDate = Calendar.getInstance();
-            restoreDate.add(Calendar.DAY_OF_MONTH, -4);
-            final long restoreHeight =
-                    (height > -1) ? height : RestoreHeight.getInstance().getHeight(restoreDate.getTime());
-            wallet.setRestoreHeight(restoreHeight);
-            Timber.d("Changed Restore Height from %d to %d", oldHeight, wallet.getRestoreHeight());
-            wallet.setPassword(password); // this rewrites the keys file (which contains the restore height)
-        } else
-            Timber.e(wallet.getStatus().toString());
-        return wallet;
-    }
-
-    private native long createWalletJ(String path, String password, String language, int networkType);
-
-    public Wallet openAccount(String path, int accountIndex, String password) {
-        long walletHandle = openWalletJ(path, password, getNetworkType().getValue());
-        Wallet wallet = new Wallet(walletHandle, accountIndex);
-        manageWallet(wallet);
-        return wallet;
-    }
-
     public Wallet openWallet(String path, String password) {
         long walletHandle = openWalletJ(path, password, getNetworkType().getValue());
         Wallet wallet = new Wallet(walletHandle);
@@ -157,25 +128,6 @@ public class WalletManager {
                                               String addressString,
                                               String viewKeyString,
                                               String spendKeyString);
-
-    public Wallet createWalletFromDevice(File aFile, String password, long restoreHeight,
-                                         Wallet.Device device) {
-        final String lookahead = device.getAccountLookahead() + ":" + device.getSubaddressLookahead();
-        Timber.d("Creating from %s with %s lookahead", device, lookahead);
-        long walletHandle = createWalletFromDeviceJ(aFile.getAbsolutePath(), password,
-                getNetworkType().getValue(), device.name(), restoreHeight,
-                lookahead);
-        Wallet wallet = new Wallet(walletHandle);
-        manageWallet(wallet);
-        return wallet;
-    }
-
-    private native long createWalletFromDeviceJ(String path, String password,
-                                                int networkType,
-                                                String deviceName,
-                                                long restoreHeight,
-                                                String subaddressLookahead);
-
 
     public native boolean closeJ(Wallet wallet);
 
