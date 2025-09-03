@@ -93,10 +93,10 @@ class MoneroKit(
         }
 
         scope = CoroutineScope(Dispatchers.IO)
-
+        Log.e("eee", "++++++ kit.start($walletId) before launch scope = $scope")
         scope?.launch {
             createWalletIfNotExists()
-
+            Log.e("eee", "++++++ kit.start($walletId) after createWalletIfNotExists()")
             val selectedNode = if (nodeInfo != null) {
                 nodeInfo
             } else if (node != null) {
@@ -106,7 +106,7 @@ class MoneroKit(
                 NodeHelper.autoselect(nodes)
             }
 
-            Log.e("eee", "selected node: ${selectedNode?.host}")
+            Log.e("eee", "++++++ kit.start($walletId) selected node: ${selectedNode?.host}")
             if (selectedNode == null) {
                 started = false
                 _syncStateFlow.update { SyncState.NotSynced(SyncError.InvalidNode("Invalid node")) }
@@ -119,29 +119,30 @@ class MoneroKit(
             walletService.setObserver(this@MoneroKit)
             val status = walletService.start(walletId, "")
 
-            Log.e("eee", "status after start: $status")
+            Log.e("eee", "++++++ status after start: $status")
             if (status == null || !status.isOk) {
                 started = false
                 _syncStateFlow.update { SyncState.NotSynced(SyncError.StartError(status?.toString() ?: "Wallet is NULL")) }
                 return@launch
             }
         }
+        Log.e("eee", "++++++ kit.start($walletId) after launch")
     }
 
     fun stop() {
         if (!started) return
         started = false
 
-        Log.e("eee", "kit.stop() before launch scope = $scope")
+        Log.e("eee", "----- kit.stop($walletId) before launch scope = $scope")
         scope?.launch {
-            Log.e("eee", "kit.stop() before service.stop()")
+            Log.e("eee", "----- kit.stop($walletId) before service.stop()")
             walletService.stop()
-            Log.e("eee", "kit.stop() after service.stop()")
+            Log.e("eee", "----- kit.stop($walletId) after service.stop()")
             scope?.cancel()
-            Log.e("eee", "kit.stop() after cancel ")
+            Log.e("eee", "----- kit.stop($walletId) after cancel ")
             scope = null
         }
-        Log.e("eee", "kit.stop() after launch ")
+        Log.e("eee", "----- kit.stop($walletId) after launch ")
     }
 
     fun saveState() {
