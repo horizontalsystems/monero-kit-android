@@ -34,7 +34,6 @@ public class WalletManager {
         System.loadLibrary("monerujo");
     }
 
-    // no need to keep a reference to the REAL WalletManager (we get it every tvTime we need it)
     private static WalletManager Instance = null;
 
     public static synchronized WalletManager getInstance() {
@@ -62,35 +61,9 @@ public class WalletManager {
         }
     }
 
-    private Wallet managedWallet = null;
-
-    public Wallet getWallet() {
-        return managedWallet;
-    }
-
-    private void manageWallet(Wallet wallet) {
-        Timber.d("Managing %s", wallet.getName());
-        managedWallet = wallet;
-    }
-
-    private void unmanageWallet(Wallet wallet) {
-        if (wallet == null) {
-            throw new IllegalArgumentException("Cannot unmanage null!");
-        }
-        if (getWallet() == null) {
-            throw new IllegalStateException("No wallet under management!");
-        }
-        if (getWallet() != wallet) {
-            throw new IllegalStateException(wallet.getName() + " not under management!");
-        }
-        Timber.d("Unmanaging %s", managedWallet.getName());
-        managedWallet = null;
-    }
-
     public Wallet openWallet(String path, String password) {
         long walletHandle = openWalletJ(path, password, getNetworkType().getValue());
         Wallet wallet = new Wallet(walletHandle);
-        manageWallet(wallet);
         return wallet;
     }
 
@@ -103,7 +76,6 @@ public class WalletManager {
                 mnemonic, offset,
                 getNetworkType().getValue(), restoreHeight);
         Wallet wallet = new Wallet(walletHandle);
-        manageWallet(wallet);
         return wallet;
     }
 
@@ -117,7 +89,6 @@ public class WalletManager {
                 language, getNetworkType().getValue(), restoreHeight,
                 addressString, viewKeyString, spendKeyString);
         Wallet wallet = new Wallet(walletHandle);
-        manageWallet(wallet);
         return wallet;
     }
 
@@ -132,14 +103,7 @@ public class WalletManager {
     public native boolean closeJ(Wallet wallet);
 
     public boolean close(Wallet wallet) {
-        unmanageWallet(wallet);
-        boolean closed = closeJ(wallet);
-        if (!closed) {
-            // in case we could not close it
-            // we manage it again
-            manageWallet(wallet);
-        }
-        return closed;
+        return closeJ(wallet);
     }
 
     public boolean walletExists(File aFile) {

@@ -69,7 +69,7 @@ class MoneroKit(
                 ""
             } else {
                 val lastUnusedSubaddress = allAddresses.drop(1).lastOrNull { it.txsCount == 0L }
-                lastUnusedSubaddress?.address ?: walletService.getWallet()?.newSubaddress ?: ""
+                lastUnusedSubaddress?.address ?: walletService.wallet?.newSubaddress ?: ""
             }
         } catch (_: Exception) {
             ""
@@ -165,14 +165,14 @@ class MoneroKit(
         address: String,
         memo: String?
     ): Long {
-        val wallet = walletService.getWallet() ?: throw IllegalStateException("Wallet is NULL")
+        val wallet = walletService.wallet ?: throw IllegalStateException("Wallet is NULL")
         val txData = buildTxData(amount, address, memo)
 
         return wallet.estimateTransactionFee(txData)
     }
 
     fun getSubaddresses(): List<Subaddress> {
-        val wallet = walletService.getWallet() ?: return emptyList()
+        val wallet = walletService.wallet ?: return emptyList()
         val list = mutableListOf<Subaddress>()
         for (i in 0..wallet.numSubaddresses) {
             wallet.getSubaddressObject(i)?.let {
@@ -183,11 +183,11 @@ class MoneroKit(
     }
 
     fun getSubaddress(accountIndex: Int, subaddressIndex: Int): Subaddress? {
-        return walletService.getWallet()?.getSubaddressObject(accountIndex, subaddressIndex)
+        return walletService.wallet?.getSubaddressObject(accountIndex, subaddressIndex)
     }
 
     fun getKeys(): Keys? {
-        val wallet = walletService.getWallet() ?: return null
+        val wallet = walletService.wallet ?: return null
 
         return Keys(
             privateSpendKey = wallet.secretSpendKey,
@@ -307,7 +307,7 @@ class MoneroKit(
         _lastBlockUpdatedFlow.tryEmit(Unit)
 
         _balanceFlow.update {
-            walletService.getWallet()?.balance ?: 0L
+            walletService.wallet?.balance ?: 0L
         }
 
         return true
@@ -362,11 +362,11 @@ class MoneroKit(
     fun statusInfo(): Map<String, Any> {
         val statusInfo = LinkedHashMap<String, Any>()
 
-        statusInfo["Wallet Status"] = walletService.getWallet()?.fullStatus ?: "NULL"
+        statusInfo["Wallet Status"] = walletService.wallet?.fullStatus ?: "NULL"
         statusInfo["Last Block Height"] = lastBlockHeight ?: 0L
         statusInfo["Sync State"] = _syncStateFlow.value
         statusInfo["Daemon Height"] = walletService.getDaemonHeight()
-        statusInfo["Connection Status"] = walletService.getConnectionStatus()
+        statusInfo["Connection Status"] = walletService.getConnectionStatus() // long network request
         statusInfo["Kit started"] = started
         statusInfo["Service running"] = WalletService.running
         statusInfo["Node"] = nodeInfo?.name ?: "NULL"
