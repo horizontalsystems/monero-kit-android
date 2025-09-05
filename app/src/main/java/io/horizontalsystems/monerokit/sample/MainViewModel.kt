@@ -58,6 +58,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun updateSyncState(syncState: SyncState) {
+        Log.e("eee", "viewmodel syncState: $syncState")
         this.syncState = syncState
 
         emitState()
@@ -68,7 +69,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
-        kit.stop()
+        viewModelScope.launch(Dispatchers.Default) {
+            kit.stop()
+        }
     }
 
     private fun emitState() {
@@ -82,7 +85,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun start() {
-        kit.start()
+        viewModelScope.launch(Dispatchers.Default) {
+            kit.start()
+        }
 
         viewModelScope.launch(Dispatchers.Default) {
             while (kit.receiveAddress.isEmpty()) {

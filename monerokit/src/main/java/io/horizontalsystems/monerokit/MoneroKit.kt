@@ -2,6 +2,7 @@ package io.horizontalsystems.monerokit
 
 import android.content.Context
 import android.util.Log
+import io.horizontalsystems.monerokit.KitManager.KitState
 import io.horizontalsystems.monerokit.MoneroKit.Companion.MONERO_LEGACY_MNEMONIC_COUNT
 import io.horizontalsystems.monerokit.data.NodeInfo
 import io.horizontalsystems.monerokit.data.Subaddress
@@ -17,22 +18,62 @@ import io.horizontalsystems.monerokit.util.Helper
 import io.horizontalsystems.monerokit.util.NetCipherHelper
 import io.horizontalsystems.monerokit.util.NodeHelper
 import io.horizontalsystems.monerokit.util.RestoreHeight
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.UUID
+
+
+object KitManager {
+
+    enum class KitState {
+        Running, Waiting, Obsolete
+    }
+
+    private var runningKitId: String? = null
+    private var waitingKitId: String? = null
+
+    @Synchronized
+    fun checkAndGetInitialState(kitId: String) =
+        if (runningKitId != null && runningKitId != kitId) {
+            waitingKitId = kitId
+            KitState.Waiting
+        } else {
+            runningKitId = kitId
+            KitState.Running
+        }
+
+    @Synchronized
+    fun checkAndGetState(kitId: String) =
+        if (runningKitId != null && runningKitId != kitId) {
+            if (waitingKitId != null && waitingKitId == kitId) {
+                KitState.Waiting
+            } else {
+                KitState.Obsolete
+            }
+        } else {
+            runningKitId = kitId
+            KitState.Running
+        }
+
+    @Synchronized
+    fun removeRunning(kitId: String) {
+        if (runningKitId == kitId) {
+            runningKitId = null
+        }
+    }
+}
 
 class MoneroKit(
     private val context: Context,
@@ -43,7 +84,12 @@ class MoneroKit(
     private val node: String?
 ) : WalletService.Observer {
 
-    private var scope: CoroutineScope? = null
+    private val kitId = UUID.randomUUID().toString()
+
+//    private val singleDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+//    private val singleDispatcherCoroutineScope = CoroutineScope(singleDispatcher)
+
+//    private var scope: CoroutineScope? = null
 
     private var started = false
     private var synced = false
@@ -84,65 +130,78 @@ class MoneroKit(
         else
             null
 
-    fun start() {
+    suspend fun start() {
         if (started) return
         started = true
 
         _syncStateFlow.update {
-            SyncState.Syncing()
+            SyncState.Connecting
         }
 
-        scope = CoroutineScope(Dispatchers.IO)
-        Log.e("eee", "++++++ kit.start($walletId) before launch scope = $scope")
-        scope?.launch {
-            createWalletIfNotExists()
-            Log.e("eee", "++++++ kit.start($walletId) after createWalletIfNotExists()")
-            val selectedNode = if (nodeInfo != null) {
-                nodeInfo
-            } else if (node != null) {
-                NodeInfo.fromString(node)
-            } else {
-                val nodes = NodeHelper.getOrPopulateFavourites()
-                NodeHelper.autoselect(nodes)
-            }
+        var kitState = KitManager.checkAndGetInitialState(kitId)
 
-            Log.e("eee", "++++++ kit.start($walletId) selected node: ${selectedNode?.host}")
-            if (selectedNode == null) {
-                started = false
-                _syncStateFlow.update { SyncState.NotSynced(SyncError.InvalidNode("Invalid node")) }
-                return@launch
-            }
-
-            nodeInfo = selectedNode
-            WalletManager.getInstance().setDaemon(selectedNode)
-
-            walletService.setObserver(this@MoneroKit)
-            val status = walletService.start(walletId, "")
-
-            Log.e("eee", "++++++ status after start: $status")
-            if (status == null || !status.isOk) {
-                started = false
-                _syncStateFlow.update { SyncState.NotSynced(SyncError.StartError(status?.toString() ?: "Wallet is NULL")) }
-                return@launch
-            }
+        Log.e("eee", "++++++ kit.start($walletId, $kitId) initial kitState: $kitState")
+        while (kitState == KitState.Waiting) {
+            delay(1000)
+            kitState = KitManager.checkAndGetState(kitId)
+            Log.e("eee", "++++++ kit.start($walletId, $kitId) waiting kitState: $kitState")
         }
-        Log.e("eee", "++++++ kit.start($walletId) after launch")
+
+        if (kitState == KitState.Running) {
+            startX()
+        }
     }
 
-    fun stop() {
+    suspend fun stop() {
+        stopX()
+
+        KitManager.removeRunning(kitId)
+    }
+
+    private suspend fun startX() {
+        Log.e("eee", "++++++ kit.startX($walletId, $kitId) before createWalletIfNotExists()")
+        createWalletIfNotExists()
+        Log.e("eee", "++++++ kit.startX($walletId, $kitId) after createWalletIfNotExists()")
+
+        val selectedNode = if (nodeInfo != null) {
+            nodeInfo
+        } else if (node != null) {
+            NodeInfo.fromString(node)
+        } else {
+            val nodes = NodeHelper.getOrPopulateFavourites()
+            NodeHelper.autoselect(nodes)
+        }
+
+        Log.e("eee", "++++++ kit.startX($walletId, $kitId) selected node: ${selectedNode?.host}")
+        if (selectedNode == null) {
+            started = false
+            _syncStateFlow.update { SyncState.NotSynced(SyncError.InvalidNode("Invalid node")) }
+            return
+        }
+
+        nodeInfo = selectedNode
+        WalletManager.getInstance().setDaemon(selectedNode)
+
+        walletService.setObserver(this@MoneroKit)
+        val status = walletService.start(walletId, "")
+
+        Log.e("eee", "++++++kit.startX($walletId, $kitId) status after start: $status")
+        if (status == null || !status.isOk) {
+            started = false
+            _syncStateFlow.update { SyncState.NotSynced(SyncError.StartError(status?.toString() ?: "Wallet is NULL")) }
+            return
+        }
+    }
+
+    private suspend fun stopX() {
         if (!started) return
         started = false
 
-        Log.e("eee", "----- kit.stop($walletId) before launch scope = $scope")
-        scope?.launch {
-            Log.e("eee", "----- kit.stop($walletId) before service.stop()")
-            walletService.stop()
-            Log.e("eee", "----- kit.stop($walletId) after service.stop()")
-            scope?.cancel()
-            Log.e("eee", "----- kit.stop($walletId) after cancel ")
-            scope = null
-        }
-        Log.e("eee", "----- kit.stop($walletId) after launch ")
+        Log.e("eee", "----- kit.stopX($walletId, $kitId) before service.stop()")
+
+        walletService.stop()
+
+        Log.e("eee", "----- kit.stopX($walletId, $kitId) after service.stop()")
     }
 
     fun saveState() {
@@ -184,6 +243,11 @@ class MoneroKit(
 
     fun getSubaddress(accountIndex: Int, subaddressIndex: Int): Subaddress? {
         return walletService.wallet?.getSubaddressObject(accountIndex, subaddressIndex)
+    }
+
+    suspend fun test() {
+        val x = restoreHeightForNewWallet()
+        Log.e("eee", "restoreHeightForNewWallet = $x")
     }
 
     fun getKeys(): Keys? {
@@ -294,6 +358,8 @@ class MoneroKit(
             } else {
                 1.0
             }
+
+            Log.e("eee", "emit syncing: $progress, current: ${_syncStateFlow.value.description}")
 
             _syncStateFlow.update {
                 SyncState.Syncing(progress)

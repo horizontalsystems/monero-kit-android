@@ -50,45 +50,44 @@ class WalletService(private val context: Context) {
     fun getDaemonHeight(): Long = daemonHeight
     fun getConnectionStatus(): Wallet.ConnectionStatus = connectionStatus
 
+    @Synchronized
     fun start(walletName: String, walletPassword: String): Wallet.Status? {
-        synchronized(this) {
-            Timber.d("start()")
-            showProgress(10)
-            running = true
+        Timber.d("start()")
+        showProgress(10)
+        running = true
 
-            if (listener == null) {
-                Timber.d("start() loadWallet")
-                val wallet = loadWallet(walletName, walletPassword) ?: return null
-                this.wallet = wallet
+        if (listener == null) {
+            Timber.d("start() loadWallet")
+            val wallet = loadWallet(walletName, walletPassword) ?: return null
+            this.wallet = wallet
 
-                Timber.d("wallet address %s, restore height: %d", wallet.address, wallet.restoreHeight)
+            Timber.d("wallet address %s, restore height: %d", wallet.address, wallet.restoreHeight)
 
-                val walletStatus = wallet.fullStatus
-                if (!walletStatus.isOk) {
-                    wallet.close()
-                    return walletStatus
-                }
-                listener = MyWalletListener().apply { start() }
-                showProgress(100)
-
-                wallet.refreshHistory()
-                Log.e("eee", "+++++ history in start: ${wallet.history.all.size}")
-                observer?.onInitialTransactions(wallet.history.all)
+            val walletStatus = wallet.fullStatus
+            if (!walletStatus.isOk) {
+                wallet.close()
+                return walletStatus
             }
-            showProgress(101)
-            // if we try to refresh the history here we get occasional segfaults!
-            // doesnt matter since we update as soon as we get a new block anyway
-            Timber.d("start() done")
+            listener = MyWalletListener().apply { start() }
+            showProgress(100)
 
-            val walletStatus = wallet?.getFullStatus()
-
-            observer?.onWalletStarted(walletStatus)
-            if ((walletStatus == null) || !walletStatus.isOk) {
-                errorState = true
-                stop()
-            }
-            return walletStatus
+            wallet.refreshHistory()
+            Log.e("eee", "+++++ history in start: ${wallet.history.all.size}")
+            observer?.onInitialTransactions(wallet.history.all)
         }
+        showProgress(101)
+        // if we try to refresh the history here we get occasional segfaults!
+        // doesnt matter since we update as soon as we get a new block anyway
+        Timber.d("start() done")
+
+        val walletStatus = wallet?.getFullStatus()
+
+        observer?.onWalletStarted(walletStatus)
+        if ((walletStatus == null) || !walletStatus.isOk) {
+            errorState = true
+            stop()
+        }
+        return walletStatus
     }
 
     fun storeWallet() {
@@ -97,20 +96,19 @@ class WalletService(private val context: Context) {
         }
     }
 
+    @Synchronized
     fun stop() {
-        synchronized(this) {
-            Timber.d("stop() listener: $listener")
-            setObserver(null)
-            listener?.let {
-                it.stop()
-                wallet?.let { wallet ->
-                    wallet.close()
-                    Timber.d("Wallet closed")
-                }
-                listener = null
+        Timber.d("stop() listener: $listener")
+        setObserver(null)
+        listener?.let {
+            it.stop()
+            wallet?.let { wallet ->
+                wallet.close()
+                Timber.d("Wallet closed")
             }
-            running = false
+            listener = null
         }
+        running = false
     }
 
     private fun loadWallet(walletName: String, walletPassword: String): Wallet? {

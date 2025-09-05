@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 class TransactionsViewModel : ViewModel() {
 
@@ -40,8 +41,10 @@ class TransactionsViewModel : ViewModel() {
     )
 
     fun refresh() {
-        kit.stop()
-        kit.start()
+        viewModelScope.launch {
+            kit.stop()
+            kit.start()
+        }
     }
 }
 
