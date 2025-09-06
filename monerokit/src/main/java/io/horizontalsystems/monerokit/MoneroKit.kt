@@ -317,6 +317,14 @@ class MoneroKit(
     override fun onRefreshed(wallet: Wallet, full: Boolean): Boolean {
         Log.e("eee", "observer.onRefreshed()\n - wallet: ${wallet.status}\n - full: $full")
 
+
+        if (!wallet.status.isOk) {
+            _syncStateFlow.update {
+                SyncState.NotSynced(IllegalStateException(wallet.status.toString()))
+            }
+            return false
+        }
+
         val historyAll: List<TransactionInfo?>? = wallet.history.all
         Log.e("eee", "historyAll: ${historyAll?.count()}")
 
