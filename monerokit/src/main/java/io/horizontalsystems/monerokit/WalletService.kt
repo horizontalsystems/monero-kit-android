@@ -70,6 +70,7 @@ class WalletService(private val context: Context) {
         return walletStatus
     }
 
+    @Synchronized
     fun storeWallet() {
         val success = wallet?.store()
         Timber.d("Wallet stored: $success")
@@ -79,14 +80,13 @@ class WalletService(private val context: Context) {
     fun stop() {
         Timber.d("stop() listener: $listener")
         setObserver(null)
-        listener?.let {
-            it.stop()
-            wallet?.let { wallet ->
-                wallet.close()
-                Timber.d("Wallet closed")
-            }
-            listener = null
+        listener?.stop()
+        wallet?.let { wallet ->
+            wallet.close()
+            Timber.d("Wallet closed")
         }
+        wallet = null
+        listener = null
         running = false
     }
 
