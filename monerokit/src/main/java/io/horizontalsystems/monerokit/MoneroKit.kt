@@ -33,6 +33,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 
 object KitManager {
@@ -91,7 +92,8 @@ class MoneroKit(
 
 //    private var scope: CoroutineScope? = null
 
-    private var started = false
+    private var started = AtomicBoolean(false)
+    private var savingState = AtomicBoolean(false)
     private var synced = false
 
     private val _syncStateFlow = MutableStateFlow<SyncState>(SyncState.NotSynced(SyncError.NotStarted))
@@ -131,8 +133,7 @@ class MoneroKit(
             null
 
     suspend fun start() {
-        if (started) return
-        started = true
+        if (started.getAndSet(true)) return
 
         _syncStateFlow.update {
             SyncState.Connecting
@@ -174,7 +175,7 @@ class MoneroKit(
 
         Log.e("eee", "++++++ kit.startX($walletId, $kitId) selected node: ${selectedNode?.host}")
         if (selectedNode == null) {
-            started = false
+            started.set(false)
             _syncStateFlow.update { SyncState.NotSynced(SyncError.InvalidNode("Invalid node")) }
             return
         }
@@ -187,15 +188,14 @@ class MoneroKit(
 
         Log.e("eee", "++++++kit.startX($walletId, $kitId) status after start: $status")
         if (status == null || !status.isOk) {
-            started = false
+            started.set(false)
             _syncStateFlow.update { SyncState.NotSynced(SyncError.StartError(status?.toString() ?: "Wallet is NULL")) }
             return
         }
     }
 
     private suspend fun stopX() {
-        if (!started) return
-        started = false
+        if (!started.getAndSet(false)) return
 
         Log.e("eee", "----- kit.stopX($walletId, $kitId) before service.stop()")
 
@@ -205,7 +205,11 @@ class MoneroKit(
     }
 
     fun saveState() {
+        if (savingState.getAndSet(true)) return
+
         walletService.storeWallet()
+
+        savingState.set(false)
     }
 
     fun send(
