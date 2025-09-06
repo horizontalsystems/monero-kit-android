@@ -315,7 +315,7 @@ class MoneroKit(
     private var firstBlock: Long = 0
 
     override fun onRefreshed(wallet: Wallet, full: Boolean): Boolean {
-        Log.e("eee", "observer.onRefreshed()\n - wallet: ${wallet.fullStatus}\n - full: $full")
+        Log.e("eee", "observer.onRefreshed()\n - wallet: ${wallet.status}\n - full: $full")
 
         val historyAll: List<TransactionInfo?>? = wallet.history.all
         Log.e("eee", "historyAll: ${historyAll?.count()}")
@@ -326,11 +326,9 @@ class MoneroKit(
             }
         }
 
-
         if (wallet.isSynchronized) {
             Log.e("eee", "wallet is synced, first sync = ${!synced}")
             if (!synced) { // first sync
-                onProgress(-1)
                 walletService.storeWallet() // save on first sync
                 synced = true
             }
@@ -387,34 +385,6 @@ class MoneroKit(
         }
     }
 
-    override fun onProgress(n: Int) {
-        Log.e("eee", "observer.onProgress()\n - n: $n")
-    }
-
-    override fun onWalletStored(success: Boolean) {
-        Log.e("eee", "observer.onWalletStored()\n - success: $success")
-    }
-
-    override fun onTransactionCreated(pendingTransaction: PendingTransaction) {
-        Log.e("eee", "observer.onTransactionCreated()\n - pendingTransaction.firstTxId : ${pendingTransaction.firstTxId}")
-    }
-
-    override fun onTransactionSent(txid: String) {
-        Log.e("eee", "observer.onTransactionSent()\n - txid: $txid")
-    }
-
-    override fun onSendTransactionFailed(error: String) {
-        Log.e("eee", "observer.onSendTransactionFailed()\n - error: $error")
-    }
-
-    override fun onWalletStarted(walletStatus: Wallet.Status?) {
-        Log.e("eee", "observer.onWalletStarted()\n - walletStatus: $walletStatus")
-    }
-
-    override fun onWalletOpen(device: Wallet.Device) {
-        Log.e("eee", "observer.onWalletOpen()\n - device: $device")
-    }
-
     private fun checkAndCloseWallet(aWallet: Wallet): Boolean {
         val walletStatus = aWallet.status
         if (!walletStatus.isOk) {
@@ -428,11 +398,11 @@ class MoneroKit(
     fun statusInfo(): Map<String, Any> {
         val statusInfo = LinkedHashMap<String, Any>()
 
-        statusInfo["Wallet Status"] = walletService.wallet?.fullStatus ?: "NULL"
+        statusInfo["Wallet Status"] = walletService.wallet?.status ?: "NULL"
         statusInfo["Last Block Height"] = lastBlockHeight ?: 0L
         statusInfo["Sync State"] = _syncStateFlow.value
         statusInfo["Daemon Height"] = walletService.getDaemonHeight()
-        statusInfo["Connection Status"] = walletService.getConnectionStatus() // long network request
+        statusInfo["Connection Status"] = walletService.getConnectionStatus()
         statusInfo["Kit started"] = started
         statusInfo["Service running"] = WalletService.running
         statusInfo["Node"] = nodeInfo?.name ?: "NULL"

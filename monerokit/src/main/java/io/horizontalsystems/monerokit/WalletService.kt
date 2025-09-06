@@ -21,7 +21,6 @@ class WalletService(private val context: Context) {
 
     private var observer: Observer? = null
     private var listener: MyWalletListener? = null
-    private var errorState = false
 
     private var daemonHeight: Long = 0
     private var lastDaemonStatusUpdate: Long = 0
@@ -32,13 +31,6 @@ class WalletService(private val context: Context) {
 
     interface Observer {
         fun onRefreshed(wallet: Wallet, full: Boolean): Boolean
-        fun onProgress(n: Int)
-        fun onWalletStored(success: Boolean)
-        fun onTransactionCreated(pendingTransaction: PendingTransaction)
-        fun onTransactionSent(txid: String)
-        fun onSendTransactionFailed(error: String)
-        fun onWalletStarted(walletStatus: Wallet.Status?)
-        fun onWalletOpen(device: Wallet.Device)
         fun onInitialTransactions(txs: List<TransactionInfo?>?)
     }
 
@@ -53,47 +45,34 @@ class WalletService(private val context: Context) {
     @Synchronized
     fun start(walletName: String, walletPassword: String): Wallet.Status? {
         Timber.d("start()")
-        showProgress(10)
+
         running = true
 
-        if (listener == null) {
-            Timber.d("start() loadWallet")
-            val wallet = loadWallet(walletName, walletPassword) ?: return null
-            this.wallet = wallet
+        Timber.d("start() loadWallet")
 
-            Timber.d("wallet address %s, restore height: %d", wallet.address, wallet.restoreHeight)
+        val wallet = loadWallet(walletName, walletPassword) ?: return null
+        this.wallet = wallet
+        Timber.d("wallet address %s, restore height: %d", wallet.address, wallet.restoreHeight)
 
-            val walletStatus = wallet.fullStatus
-            if (!walletStatus.isOk) {
-                wallet.close()
-                return walletStatus
-            }
-            listener = MyWalletListener().apply { start() }
-            showProgress(100)
+        val walletStatus = wallet.fullStatus
 
-            wallet.refreshHistory()
-            Log.e("eee", "+++++ history in start: ${wallet.history.all.size}")
-            observer?.onInitialTransactions(wallet.history.all)
-        }
-        showProgress(101)
-        // if we try to refresh the history here we get occasional segfaults!
-        // doesnt matter since we update as soon as we get a new block anyway
-        Timber.d("start() done")
-
-        val walletStatus = wallet?.getFullStatus()
-
-        observer?.onWalletStarted(walletStatus)
-        if ((walletStatus == null) || !walletStatus.isOk) {
-            errorState = true
+        if (!walletStatus.isOk) {
             stop()
+            return walletStatus
         }
+
+        listener = MyWalletListener().apply { start() }
+        wallet.refreshHistory()
+
+        Log.e("eee", "+++++ history in start: ${wallet.history.all.size}")
+        observer?.onInitialTransactions(wallet.history.all)
+
         return walletStatus
     }
 
     fun storeWallet() {
-        wallet?.store()?.let {
-            observer?.onWalletStored(it)
-        }
+        val success = wallet?.store()
+        Timber.d("Wallet stored: $success")
     }
 
     @Synchronized
@@ -126,10 +105,7 @@ class WalletService(private val context: Context) {
 
         return if (walletMgr.walletExists(path)) {
             Timber.d("open wallet %s", path)
-            val device = walletMgr.queryWalletDevice("$path.keys", walletPassword)
-            observer?.onWalletOpen(device)
             val wallet = walletMgr.openWallet(path, walletPassword)
-
             Timber.d("wallet opened")
 
             if (!wallet.status.isOk) {
@@ -155,12 +131,6 @@ class WalletService(private val context: Context) {
             connectionStatus = if (daemonHeight > 0)
                 Wallet.ConnectionStatus.ConnectionStatus_Connected
             else Wallet.ConnectionStatus.ConnectionStatus_Disconnected
-        }
-    }
-
-    private fun showProgress(n: Int) {
-        if (observer != null) {
-            observer!!.onProgress(n)
         }
     }
 
@@ -238,7 +208,6 @@ class WalletService(private val context: Context) {
                 if (observer != null) {
                     updated = !observer!!.onRefreshed(wallet, true)
                 }
-//                updated = !(observer?.onRefreshed(wallet, true) ?: false)
             }
         }
     }
@@ -259,12 +228,6 @@ class WalletService(private val context: Context) {
             Timber.e("Create Transaction failed: %s", pendingTransaction.getErrorString())
             throw IllegalStateException("Create Transaction failed: ${pendingTransaction.getErrorString()}")
         }
-
-        if (observer != null) {
-            observer?.onTransactionCreated(pendingTransaction)
-        } else {
-            wallet.disposePendingTransaction()
-        }
     }
 
     fun sendTransaction(notes: String?) {
@@ -281,7 +244,6 @@ class WalletService(private val context: Context) {
             Timber.e("PendingTransaction is %s", pendingTransaction.status)
 
             wallet.disposePendingTransaction()
-            observer?.onSendTransactionFailed(pendingTransaction.getErrorString())
             throw IllegalStateException("Send Transaction failed: ${pendingTransaction.getErrorString()}")
         }
         val txId = pendingTransaction.getFirstTxId()
@@ -289,7 +251,6 @@ class WalletService(private val context: Context) {
 
         if (success) {
             wallet.disposePendingTransaction()
-            observer?.onTransactionSent(txId)
             if (!notes.isNullOrEmpty()) {
                 wallet.setUserNote(txId, notes)
             }
@@ -299,12 +260,10 @@ class WalletService(private val context: Context) {
             if (!rc) {
                 Timber.w("Wallet store failed: %s", wallet.status.errorString)
             }
-            observer?.onWalletStored(rc)
             listener?.updated = true
         } else {
             val error = pendingTransaction.getErrorString()
             wallet.disposePendingTransaction()
-            observer?.onSendTransactionFailed(error)
             throw IllegalStateException("Send Transaction failed: $error")
         }
     }
