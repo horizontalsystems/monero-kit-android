@@ -242,8 +242,9 @@ public class Wallet {
 
     private native int getConnectionStatusJ();
 
-//TODO virtual void setTrustedDaemon(bool arg) = 0;
-//TODO virtual bool trustedDaemon() const = 0;
+    public native void setTrustedDaemon(boolean isTrusted);
+
+    public native boolean trustedDaemon();
 
     public native boolean setProxy(String address);
 

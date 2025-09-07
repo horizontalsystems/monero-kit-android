@@ -43,14 +43,12 @@ class WalletService(private val context: Context) {
     fun getConnectionStatus(): Wallet.ConnectionStatus = connectionStatus
 
     @Synchronized
-    fun start(walletName: String, walletPassword: String): Wallet.Status? {
+    fun start(walletName: String, walletPassword: String, trustNode: Boolean): Wallet.Status? {
         Timber.d("start()")
 
         running = true
 
-        Timber.d("start() loadWallet")
-
-        val wallet = loadWallet(walletName, walletPassword) ?: return null
+        val wallet = loadWallet(walletName, walletPassword, trustNode) ?: return null
         this.wallet = wallet
         Timber.d("wallet address %s, restore height: %d", wallet.address, wallet.restoreHeight)
 
@@ -91,10 +89,11 @@ class WalletService(private val context: Context) {
         running = false
     }
 
-    private fun loadWallet(walletName: String, walletPassword: String): Wallet? {
+    private fun loadWallet(walletName: String, walletPassword: String, trustNode: Boolean): Wallet? {
         val wallet = openWallet(walletName, walletPassword) ?: return null
         Timber.d("Using daemon %s", WalletManager.getInstance().daemonAddress)
         wallet.init(0)
+        wallet.setTrustedDaemon(trustNode)
         wallet.setProxy(NetCipherHelper.getProxy())
         return wallet
     }

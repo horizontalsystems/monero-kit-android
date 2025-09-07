@@ -84,7 +84,8 @@ class MoneroKit(
     private val restoreHeight: Long,
     private val walletId: String,
     private val walletService: WalletService,
-    private val node: String?
+    private val node: String,
+    private val trustNode: Boolean
 ) : WalletService.Observer {
 
     private val kitId = UUID.randomUUID().toString()
@@ -188,7 +189,7 @@ class MoneroKit(
         WalletManager.getInstance().setDaemon(selectedNode)
 
         walletService.setObserver(this@MoneroKit)
-        val status = walletService.start(walletId, "")
+        val status = walletService.start(walletId, "", trustNode)
 
         Log.e("eee", "++++++kit.startX($walletId, $kitId) status after start: $status")
         if (status == null || !status.isOk) {
@@ -448,7 +449,8 @@ class MoneroKit(
             seed: Seed,
             restoreDateOrHeight: String,
             walletId: String,
-            node: String?
+            node: String,
+            trustNode: Boolean
         ): MoneroKit {
             val walletService = WalletService(context)
             val restoreHeight = getHeight(restoreDateOrHeight)
@@ -457,7 +459,7 @@ class MoneroKit(
 
             NetCipherHelper.createInstance(context)
 
-            return MoneroKit(context, seed.toElectrum(), restoreHeight, walletId, walletService, node)
+            return MoneroKit(context, seed.toElectrum(), restoreHeight, walletId, walletService, node, trustNode)
         }
 
         fun validateAddress(address: String) {

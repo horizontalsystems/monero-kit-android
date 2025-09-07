@@ -762,8 +762,19 @@ Java_io_horizontalsystems_monerokit_model_Wallet_getConnectionStatusJ(JNIEnv *en
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
     return wallet->connected();
 }
-//TODO virtual void setTrustedDaemon(bool arg) = 0;
-//TODO virtual bool trustedDaemon() const = 0;
+
+JNIEXPORT void JNICALL
+Java_io_horizontalsystems_monerokit_model_Wallet_setTrustedDaemon(JNIEnv *env, jobject instance, jboolean isTrusted) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    LOGD("setTrustedDaemon %s", isTrusted ? "true" : "false");
+    wallet->setTrustedDaemon(isTrusted);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_io_horizontalsystems_monerokit_model_Wallet_trustedDaemon(JNIEnv *env, jobject instance) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    return static_cast<jboolean>(wallet->trustedDaemon());
+}
 
 JNIEXPORT jboolean JNICALL
 Java_io_horizontalsystems_monerokit_model_Wallet_setProxy(JNIEnv *env, jobject instance,
