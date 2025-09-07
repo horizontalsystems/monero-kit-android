@@ -64,7 +64,8 @@ class WalletService(private val context: Context) {
         listener = MyWalletListener().apply { start() }
         wallet.refreshHistory()
 
-        Log.e("eee", "+++++ history in start: ${wallet.history.all.size}")
+        Log.e("eee", "+++++ history in start: ${wallet.history.all.size}, balance: ${wallet.balance}")
+
         observer?.onInitialTransactions(wallet.history.all)
 
         return walletStatus

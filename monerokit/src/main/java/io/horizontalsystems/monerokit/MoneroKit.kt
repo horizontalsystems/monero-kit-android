@@ -27,6 +27,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
@@ -87,12 +89,8 @@ class MoneroKit(
 
     private val kitId = UUID.randomUUID().toString()
 
-//    private val singleDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
-//    private val singleDispatcherCoroutineScope = CoroutineScope(singleDispatcher)
-
-//    private var scope: CoroutineScope? = null
-
-    private var started = AtomicBoolean(false)
+    private val startStopMutex = Mutex()
+    private var started = false
     private var savingState = AtomicBoolean(false)
     private var synced = false
 
@@ -133,33 +131,40 @@ class MoneroKit(
             null
 
     suspend fun start() {
-        if (started.getAndSet(true)) return
+        startStopMutex.withLock {
+            if (started) return
 
-        _syncStateFlow.update {
-            SyncState.Connecting
-        }
+            _syncStateFlow.update {
+                SyncState.Connecting
+            }
 
-        var kitState = KitManager.checkAndGetInitialState(kitId)
+            var kitState = KitManager.checkAndGetInitialState(kitId)
 
-        Log.e("eee", "++++++ kit.start($walletId, $kitId) initial kitState: $kitState")
-        while (kitState == KitState.Waiting) {
-            delay(1000)
-            kitState = KitManager.checkAndGetState(kitId)
-            Log.e("eee", "++++++ kit.start($walletId, $kitId) waiting kitState: $kitState")
-        }
+            Log.e("eee", "++++++ kit.start($walletId, $kitId) initial kitState: $kitState")
+            while (kitState == KitState.Waiting) {
+                delay(1000)
+                kitState = KitManager.checkAndGetState(kitId)
+                Log.e("eee", "++++++ kit.start($walletId, $kitId) waiting kitState: $kitState")
+            }
 
-        if (kitState == KitState.Running) {
-            startX()
+            if (kitState == KitState.Running) {
+                started = startInternal()
+            }
         }
     }
 
     suspend fun stop() {
-        stopX()
+        startStopMutex.withLock {
+            if (!started) return
 
-        KitManager.removeRunning(kitId)
+            stopInternal()
+            KitManager.removeRunning(kitId)
+
+            started = false
+        }
     }
 
-    private suspend fun startX() {
+    private suspend fun startInternal(): Boolean {
         Log.e("eee", "++++++ kit.startX($walletId, $kitId) before createWalletIfNotExists()")
         createWalletIfNotExists()
         Log.e("eee", "++++++ kit.startX($walletId, $kitId) after createWalletIfNotExists()")
@@ -175,9 +180,8 @@ class MoneroKit(
 
         Log.e("eee", "++++++ kit.startX($walletId, $kitId) selected node: ${selectedNode?.host}")
         if (selectedNode == null) {
-            started.set(false)
             _syncStateFlow.update { SyncState.NotSynced(SyncError.InvalidNode("Invalid node")) }
-            return
+            return false
         }
 
         nodeInfo = selectedNode
@@ -188,14 +192,14 @@ class MoneroKit(
 
         Log.e("eee", "++++++kit.startX($walletId, $kitId) status after start: $status")
         if (status == null || !status.isOk) {
-            started.set(false)
             _syncStateFlow.update { SyncState.NotSynced(SyncError.StartError(status?.toString() ?: "Wallet is NULL")) }
-            return
+            return false
         }
+
+        return true
     }
 
-    private suspend fun stopX() {
-        if (!started.getAndSet(false)) return
+    private fun stopInternal() {
 
         Log.e("eee", "----- kit.stopX($walletId, $kitId) before service.stop()")
 
