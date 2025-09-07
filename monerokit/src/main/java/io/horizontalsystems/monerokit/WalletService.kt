@@ -31,7 +31,7 @@ class WalletService(private val context: Context) {
 
     interface Observer {
         fun onRefreshed(wallet: Wallet, full: Boolean): Boolean
-        fun onInitialTransactions(txs: List<TransactionInfo?>?)
+        fun onInitialWalletState(balance: Long, txs: List<TransactionInfo?>?)
     }
 
     fun setObserver(obs: Observer?) {
@@ -66,7 +66,7 @@ class WalletService(private val context: Context) {
 
         Log.e("eee", "+++++ history in start: ${wallet.history.all.size}, balance: ${wallet.balance}")
 
-        observer?.onInitialTransactions(wallet.history.all)
+        observer?.onInitialWalletState(wallet.balance, wallet.history.all)
 
         return walletStatus
     }

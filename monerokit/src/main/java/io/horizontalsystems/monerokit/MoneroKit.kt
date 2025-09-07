@@ -393,7 +393,11 @@ class MoneroKit(
         return true
     }
 
-    override fun onInitialTransactions(txs: List<TransactionInfo?>?) {
+    override fun onInitialWalletState(balance: Long, txs: List<TransactionInfo?>?) {
+        _balanceFlow.update {
+            balance
+        }
+
         txs?.let {
             _allTransactionsFlow.update {
                 txs.mapNotNull { it }
