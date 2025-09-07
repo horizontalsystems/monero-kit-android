@@ -73,7 +73,8 @@ object KitManager {
     @Synchronized
     fun removeRunning(kitId: String) {
         if (runningKitId == kitId) {
-            runningKitId = null
+            runningKitId = waitingKitId
+            waitingKitId = null
         }
     }
 }
