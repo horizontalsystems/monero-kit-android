@@ -157,7 +157,10 @@ class MoneroKit(
 
     suspend fun stop() {
         startStopMutex.withLock {
-            if (!started) return
+            if (!started) {
+                KitManager.removeRunning(kitId)
+                return
+            }
 
             stopInternal()
             KitManager.removeRunning(kitId)
