@@ -153,6 +153,7 @@ public class RestoreHeight {
         blockheight.put("2023-03-01", 2832118L);
         blockheight.put("2023-04-01", 2854365L);
         blockheight.put("2023-05-01", 2875972L);
+        blockheight.put("2025-09-01", 3490175L);
     }
 
     public long getHeight(String date) {
@@ -170,7 +171,7 @@ public class RestoreHeight {
         Calendar cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
         cal.set(Calendar.DST_OFFSET, 0);
         cal.setTime(date);
-        cal.add(Calendar.DAY_OF_MONTH, -4); // give it some leeway
+        cal.add(Calendar.DAY_OF_MONTH, -2); // give it some leeway
         if (cal.get(Calendar.YEAR) < 2014)
             return 0;
         if ((cal.get(Calendar.YEAR) == 2014) && (cal.get(Calendar.MONTH) <= 3))
