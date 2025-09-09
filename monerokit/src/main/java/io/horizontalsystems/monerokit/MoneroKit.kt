@@ -485,6 +485,14 @@ class MoneroKit(
             return Keys(privateSpendKey, publicSpendKey, privateViewKey, publicViewKey)
         }
 
+        fun getAddress(seed: Seed, accountIndex: Int, addressIndex: Int): String {
+            val electrumSeed = seed.toElectrum()
+            val mnemonic = electrumSeed.mnemonic.joinToString(" ")
+            val passphrase = electrumSeed.passphrase
+
+            return WalletManager.getAddress(mnemonic, passphrase, accountIndex, addressIndex)
+        }
+
         fun restoreHeightForNewWallet(): Long {
             return RestoreHeight.getInstance().getHeight(Calendar.getInstance().getTime())
         }

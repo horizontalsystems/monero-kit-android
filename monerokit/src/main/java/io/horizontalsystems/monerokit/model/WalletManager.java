@@ -256,8 +256,14 @@ public class WalletManager {
 
     static private native String generateKey(String seed, String seed_offset, boolean private_key, boolean spend_key);
 
+    static private native String generateAddress(String seed, String seed_offset, int account_index, int address_index, boolean testnet);
+
     static public String getPrivateSpendKey(String mnemonic, String passphrase) {
         return generateKey(mnemonic, passphrase, true, true);
+    }
+
+    static public String getAddress(String mnemonic, String passphrase, int accountIndex, int addressIndex) {
+        return generateAddress(mnemonic, passphrase, accountIndex, addressIndex, false);
     }
 
     static public String getPublicSpendKey(String mnemonic, String passphrase) {

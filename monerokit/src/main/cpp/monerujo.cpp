@@ -1631,6 +1631,19 @@ Java_io_horizontalsystems_monerokit_model_WalletManager_generateKey(JNIEnv *env,
     return env->NewStringUTF(key.c_str());
 }
 
+JNIEXPORT jstring JNICALL
+Java_io_horizontalsystems_monerokit_model_WalletManager_generateAddress(JNIEnv *env, jclass clazz, jstring seed, jstring seed_offset, jint account_index, jint address_index,  jboolean testnet) {
+    const char *_seed = env->GetStringUTFChars(seed, nullptr);
+    const char *_seed_offset = env->GetStringUTFChars(seed_offset, nullptr);
+
+    std::string key = Monero::Wallet::generateAddress(_seed, _seed_offset, account_index, address_index, testnet);
+
+    env->ReleaseStringUTFChars(seed, _seed);
+    env->ReleaseStringUTFChars(seed_offset, _seed_offset);
+
+    return env->NewStringUTF(key.c_str());
+}
+
 //
 // Ledger Stuff
 //

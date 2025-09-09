@@ -35,7 +35,8 @@ class App : Application() {
             seed = Seed.Bip39("".split(" "), ""),
             restoreDateOrHeight = "3438000",
             walletId = "wallet_id_111",
-            node = DefaultNodes.BOLDSUCK.uri
+            node = DefaultNodes.BOLDSUCK.uri,
+            trustNode = true
         )
     }
 
