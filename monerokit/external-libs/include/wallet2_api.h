@@ -742,7 +742,7 @@ struct Wallet
     static void warning(const std::string &category, const std::string &str);
     static void error(const std::string &category, const std::string &str);
     static std::string generateKey(const std::string &seed, const std::string &seed_offset, const bool privateKey, const bool spendKey);
-
+    static std::string generateAddress(const std::string &seed, const std::string &seed_offset, uint32_t account_index, uint32_t address_index, bool testnet);
    /**
     * @brief StartRefresh - Start/resume refresh thread (refresh every 10 seconds)
     */
