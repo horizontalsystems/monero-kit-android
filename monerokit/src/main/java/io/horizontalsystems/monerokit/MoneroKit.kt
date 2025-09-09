@@ -137,7 +137,7 @@ class MoneroKit(
             if (started) return
 
             _syncStateFlow.update {
-                SyncState.Connecting
+                SyncState.Connecting(true)
             }
 
             var kitState = KitManager.checkAndGetInitialState(kitId)
@@ -150,6 +150,9 @@ class MoneroKit(
             }
 
             if (kitState == KitState.Running) {
+                _syncStateFlow.update {
+                    SyncState.Connecting(false)
+                }
                 started = startInternal()
             }
         }
@@ -431,14 +434,15 @@ class MoneroKit(
     fun statusInfo(): Map<String, Any> {
         val statusInfo = LinkedHashMap<String, Any>()
 
+        statusInfo["Node"] = nodeInfo?.name?.let { "$it (${if (trustNode) "trusted" else "untrusted"})" } ?: "NULL"
         statusInfo["Wallet Status"] = walletService.wallet?.status ?: "NULL"
+        statusInfo["Sync State"] = _syncStateFlow.value.description
         statusInfo["Last Block Height"] = lastBlockHeight ?: 0L
-        statusInfo["Sync State"] = _syncStateFlow.value
+        statusInfo["Wallet Height"] = walletService.wallet?.blockChainHeight ?: 0L
         statusInfo["Daemon Height"] = walletService.getDaemonHeight()
         statusInfo["Connection Status"] = walletService.getConnectionStatus()
         statusInfo["Kit started"] = started
         statusInfo["Service running"] = WalletService.running
-        statusInfo["Node"] = nodeInfo?.name ?: "NULL"
 
         return statusInfo
     }
