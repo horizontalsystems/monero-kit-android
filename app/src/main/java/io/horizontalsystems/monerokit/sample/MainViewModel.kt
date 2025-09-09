@@ -85,6 +85,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch(Dispatchers.Default) {
+            address = kit.receiveAddress
             while (kit.receiveAddress.isEmpty()) {
                 delay(100)
                 address = kit.receiveAddress.ifBlank({ "Loading.." })

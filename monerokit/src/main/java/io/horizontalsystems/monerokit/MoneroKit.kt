@@ -90,7 +90,7 @@ class MoneroKit(
 ) : WalletService.Observer {
 
     private val kitId = UUID.randomUUID().toString()
-
+    private val accountIndex = 0
     private val startStopMutex = Mutex()
     private var started = false
     private var savingState = AtomicBoolean(false)
@@ -112,13 +112,8 @@ class MoneroKit(
 
     val receiveAddress: String
         get() = try {
-            val allAddresses = getSubaddresses()
-            if (allAddresses.isEmpty()) {
-                ""
-            } else {
-                val lastUnusedSubaddress = allAddresses.drop(1).lastOrNull { it.txsCount == 0L }
-                lastUnusedSubaddress?.address ?: walletService.wallet?.newSubaddress ?: ""
-            }
+            val lastUnusedSubaddress = getSubaddresses().drop(1).lastOrNull { it.txsCount == 0L }
+            lastUnusedSubaddress?.address ?: walletService.wallet?.newSubaddress ?: ""
         } catch (_: Exception) {
             ""
         }
@@ -255,7 +250,11 @@ class MoneroKit(
     }
 
     fun getSubaddresses(): List<Subaddress> {
-        val wallet = walletService.wallet ?: return emptyList()
+        val wallet = walletService.wallet
+        if (wallet == null) {
+            return generateSubaddresses(seed, accountIndex, 2)
+        }
+
         val list = mutableListOf<Subaddress>()
         for (i in 0..wallet.numSubaddresses) {
             wallet.getSubaddressObject(i)?.let {
@@ -503,6 +502,20 @@ class MoneroKit(
             val passphrase = electrumSeed.passphrase
 
             return WalletManager.getAddress(mnemonic, passphrase, accountIndex, addressIndex)
+        }
+
+        private fun generateSubaddresses(seed: Seed, accountIndex: Int, count: Int): List<Subaddress> {
+            val electrumSeed = seed.toElectrum()
+            val mnemonic = electrumSeed.mnemonic.joinToString(" ")
+            val passphrase = electrumSeed.passphrase
+
+            val subaddresses = mutableListOf<Subaddress>()
+            for (i in 0 until count) {
+                val address = WalletManager.getAddress(mnemonic, passphrase, accountIndex, i)
+                val subaddress = Subaddress(accountIndex, i, address, "")
+                subaddresses.add(subaddress)
+            }
+            return subaddresses
         }
 
         fun restoreHeightForNewWallet(): Long {
