@@ -170,46 +170,54 @@ class MoneroKit(
     }
 
     private suspend fun startInternal(): Boolean {
-        Log.e("eee", "++++++ kit.startX($walletId, $kitId) before createWalletIfNotExists()")
-        createWalletIfNotExists()
-        Log.e("eee", "++++++ kit.startX($walletId, $kitId) after createWalletIfNotExists()")
+        try {
+            Log.e("eee", "++++++ kit.startX($walletId, $kitId) before createWalletIfNotExists()")
+            createWalletIfNotExists()
+            Log.e("eee", "++++++ kit.startX($walletId, $kitId) after createWalletIfNotExists()")
 
-        val selectedNode = if (nodeInfo != null) {
-            nodeInfo
-        } else if (node != null) {
-            NodeInfo.fromString(node)
-        } else {
-            val nodes = NodeHelper.getOrPopulateFavourites()
-            NodeHelper.autoselect(nodes)
-        }
+            walletService.setObserver(this@MoneroKit)
+            val wallet = walletService.openWallet(walletId, "")
+            if (wallet == null) {
+                _syncStateFlow.update { SyncState.NotSynced(SyncError.InvalidNode("Invalid wallet")) }
+                return false
+            }
 
-        Log.e("eee", "++++++ kit.startX($walletId, $kitId) selected node: ${selectedNode?.host}")
-        if (selectedNode == null) {
-            _syncStateFlow.update { SyncState.NotSynced(SyncError.InvalidNode("Invalid node")) }
+            val selectedNode = if (nodeInfo != null) {
+                nodeInfo
+            } else {
+                NodeInfo.fromString(node)
+            }
+
+            Log.e("eee", "++++++ kit.startX($walletId, $kitId) selected node: ${selectedNode?.host}")
+            if (selectedNode == null) {
+                _syncStateFlow.update { SyncState.NotSynced(SyncError.InvalidNode("Invalid node")) }
+                return false
+            }
+
+            nodeInfo = selectedNode
+            WalletManager.getInstance().setDaemon(selectedNode)
+
+            val status = walletService.start(wallet, trustNode)
+
+            Log.e("eee", "++++++kit.startX($walletId, $kitId) status after start: $status")
+            if (status == null || !status.isOk) {
+                _syncStateFlow.update { SyncState.NotSynced(SyncError.StartError(status?.toString() ?: "Wallet is NULL")) }
+                return false
+            }
+            return true
+        } catch (ex: Exception) {
+            _syncStateFlow.update { SyncState.NotSynced(SyncError.StartError(ex.message ?: ex.javaClass.simpleName)) }
             return false
         }
-
-        nodeInfo = selectedNode
-        WalletManager.getInstance().setDaemon(selectedNode)
-
-        walletService.setObserver(this@MoneroKit)
-        val status = walletService.start(walletId, "", trustNode)
-
-        Log.e("eee", "++++++kit.startX($walletId, $kitId) status after start: $status")
-        if (status == null || !status.isOk) {
-            _syncStateFlow.update { SyncState.NotSynced(SyncError.StartError(status?.toString() ?: "Wallet is NULL")) }
-            return false
-        }
-
-        return true
     }
 
     private fun stopInternal() {
-
         Log.e("eee", "----- kit.stopX($walletId, $kitId) before service.stop()")
-
-        walletService.stop()
-
+        try {
+            walletService.stop()
+        } catch (err: Throwable) {
+            Log.e("eee", "----- kit.stopX($walletId, $kitId) error in service.stop()", err)
+        }
         Log.e("eee", "----- kit.stopX($walletId, $kitId) after service.stop()")
     }
 

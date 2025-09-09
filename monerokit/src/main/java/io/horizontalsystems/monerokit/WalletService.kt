@@ -43,16 +43,18 @@ class WalletService(private val context: Context) {
     fun getConnectionStatus(): Wallet.ConnectionStatus = connectionStatus
 
     @Synchronized
-    fun start(walletName: String, walletPassword: String, trustNode: Boolean): Wallet.Status? {
+    fun start(wallet: Wallet, trustNode: Boolean): Wallet.Status? {
         Timber.d("start()")
 
         running = true
-
-        val wallet = loadWallet(walletName, walletPassword, trustNode) ?: return null
         this.wallet = wallet
+
         Timber.d("wallet address %s, restore height: %d", wallet.address, wallet.restoreHeight)
 
-        val walletStatus = wallet.fullStatus
+        initWallet(wallet, trustNode)
+
+        Log.e("eee", "+++++ wallet.status: ${wallet.status}")
+        val walletStatus = wallet.status
 
         if (!walletStatus.isOk) {
             stop()
@@ -60,12 +62,6 @@ class WalletService(private val context: Context) {
         }
 
         listener = MyWalletListener().apply { start() }
-        wallet.refreshHistory()
-
-        Log.e("eee", "+++++ history in start: ${wallet.history.all.size}, balance: ${wallet.balance}")
-
-        observer?.onInitialWalletState(wallet.balance, wallet.history.all)
-
         return walletStatus
     }
 
@@ -89,16 +85,7 @@ class WalletService(private val context: Context) {
         running = false
     }
 
-    private fun loadWallet(walletName: String, walletPassword: String, trustNode: Boolean): Wallet? {
-        val wallet = openWallet(walletName, walletPassword) ?: return null
-        Timber.d("Using daemon %s", WalletManager.getInstance().daemonAddress)
-        wallet.init(0)
-        wallet.setTrustedDaemon(trustNode)
-        wallet.setProxy(NetCipherHelper.getProxy())
-        return wallet
-    }
-
-    private fun openWallet(walletName: String, walletPassword: String): Wallet? {
+    fun openWallet(walletName: String, walletPassword: String): Wallet? {
         val path = Helper.getWalletFile(context, walletName).absolutePath
         val walletMgr = WalletManager.getInstance()
         Timber.d("WalletManager network=%s", walletMgr.networkType.name)
@@ -107,16 +94,32 @@ class WalletService(private val context: Context) {
             Timber.d("open wallet %s", path)
             val wallet = walletMgr.openWallet(path, walletPassword)
             Timber.d("wallet opened")
-
             if (!wallet.status.isOk) {
                 Timber.d("wallet status is %s", wallet.status)
                 walletMgr.close(wallet)
                 null
-            } else wallet
+            } else {
+                try {
+                    wallet.refreshHistory()
+                    Log.e("eee", "+++++ history in openWallet: ${wallet.history.all.size}, balance: ${wallet.balance}")
+                    observer?.onInitialWalletState(wallet.balance, wallet.history.all)
+                } catch (err: Throwable) {
+                    Log.e("eee", "+++++ error in openWallet onInitialWalletState", err)
+                    Unit
+                }
+                wallet
+            }
         } else {
             Timber.d("service.openWallet wallet path does not exists %s", path)
             null
         }
+    }
+
+    private fun initWallet(wallet: Wallet, trustNode: Boolean) {
+        Timber.d("Using daemon %s", WalletManager.getInstance().daemonAddress)
+        wallet.init(0)
+        wallet.setTrustedDaemon(trustNode)
+        wallet.setProxy(NetCipherHelper.getProxy())
     }
 
     private fun updateDaemonState(wallet: Wallet, height: Long) {

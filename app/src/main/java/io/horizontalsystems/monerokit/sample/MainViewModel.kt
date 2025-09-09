@@ -38,11 +38,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             kit.syncStateFlow.collect(::updateSyncState)
         }
         viewModelScope.launch(Dispatchers.Default) {
-            kit.allTransactionsFlow.collect {
-                Log.e("eee", "txs: ${it.joinToString(separator = "\n")}")
-            }
-        }
-        viewModelScope.launch(Dispatchers.Default) {
             kit.balanceFlow.collect {
                 updateBalance(it)
             }
@@ -100,6 +95,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stop() {
         kit.stop()
+    }
+
+    fun saveState() {
+        kit.saveState()
     }
 }
 

@@ -32,6 +32,10 @@ fun BalanceScreen(viewModel: MainViewModel, uiState: MainUiState, navController:
                 Button(onClick = viewModel::stop) {
                     Text(text = "Stop")
                 }
+                Spacer(modifier = Modifier.weight(1f))
+                Button(onClick = viewModel::saveState) {
+                    Text(text = "Save state")
+                }
             }
         }
     }
