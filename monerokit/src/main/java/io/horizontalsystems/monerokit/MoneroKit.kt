@@ -160,6 +160,7 @@ class MoneroKit(
                 return
             }
 
+            delay(1000)
             stopInternal()
             KitManager.removeRunning(kitId)
 

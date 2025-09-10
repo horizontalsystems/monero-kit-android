@@ -76,7 +76,9 @@ class WalletService(private val context: Context) {
         Timber.d("stop() listener: $listener")
         setObserver(null)
         listener?.stop()
+        Timber.d("stop wallet: ${wallet?.name}")
         wallet?.let { wallet ->
+            Timber.d("Closing wallet")
             wallet.close()
             Timber.d("Wallet closed")
         }
@@ -107,6 +109,7 @@ class WalletService(private val context: Context) {
                     Log.e("eee", "+++++ error in openWallet onInitialWalletState", err)
                     Unit
                 }
+                this.wallet = wallet
                 wallet
             }
         } else {
