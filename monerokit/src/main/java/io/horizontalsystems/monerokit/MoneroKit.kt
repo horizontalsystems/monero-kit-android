@@ -484,6 +484,16 @@ class MoneroKit(
             }
         }
 
+        fun validatePrivateViewKey(privateViewKey: String, address: String) {
+            val error = Wallet.isPrivateViewKeyValid(privateViewKey, address)
+            check(error == null) { error }
+        }
+
+        fun validatePrivateSpendKey(privateSpendKey: String, address: String) {
+            val error = Wallet.isPrivateSpendKeyValid(privateSpendKey, address)
+            check(error == null) { error }
+        }
+
         fun getKeys(seed: Seed): Keys {
             val electrumSeed = seed.toElectrum()
             val mnemonic = electrumSeed.mnemonic.joinToString(" ")

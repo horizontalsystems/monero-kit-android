@@ -298,7 +298,17 @@ public class Wallet {
         return isAddressValid(address, WalletManager.getInstance().getNetworkType().getValue());
     }
 
+    public static String isPrivateViewKeyValid(String secret_key, String address) {
+        return isKeyValid(secret_key, address, true, WalletManager.getInstance().getNetworkType().getValue());
+    }
+
+    public static String isPrivateSpendKeyValid(String secret_key, String address) {
+        return isKeyValid(secret_key, address, false, WalletManager.getInstance().getNetworkType().getValue());
+    }
+
     public static native boolean isAddressValid(String address, int networkType);
+
+    public static native String isKeyValid(String secret_key, String address, Boolean is_view_key, int networkType);
 
     public static native String getPaymentIdFromAddress(String address, int networkType);
 

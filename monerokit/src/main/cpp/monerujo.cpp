@@ -919,6 +919,22 @@ Java_io_horizontalsystems_monerokit_model_Wallet_isPaymentIdValid(JNIEnv *env, j
     return static_cast<jboolean>(isValid);
 }
 
+JNIEXPORT jstring JNICALL
+Java_io_horizontalsystems_monerokit_model_Wallet_isKeyValid(JNIEnv *env, jclass clazz, jstring secret_key, jstring address, jboolean is_view_key, jint networkType) {
+    const char *_secret_key = env->GetStringUTFChars(secret_key, nullptr);
+    const char *_address = env->GetStringUTFChars(address, nullptr);
+    Monero::NetworkType _networkType = static_cast<Monero::NetworkType>(networkType);
+    std::string errorString;
+    bool isValid = Monero::Wallet::keyValid(_secret_key, _address, is_view_key, _networkType, errorString);
+    env->ReleaseStringUTFChars(secret_key, _secret_key);
+    env->ReleaseStringUTFChars(address, _address);
+    if (!isValid) {
+        LOGE("isKeyValid() %s", errorString.c_str());
+        return env->NewStringUTF(errorString.c_str());
+    }
+    return nullptr;
+}
+
 JNIEXPORT jboolean JNICALL
 Java_io_horizontalsystems_monerokit_model_Wallet_isAddressValid(JNIEnv *env, jclass clazz,
                                                       jstring address, jint networkType) {
