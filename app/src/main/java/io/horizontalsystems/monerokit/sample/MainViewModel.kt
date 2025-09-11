@@ -56,6 +56,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         Log.e("eee", "viewmodel syncState: $syncState")
         this.syncState = syncState
 
+        if (syncState is SyncState.Synced) {
+            address = kit.receiveAddress
+        }
+
         emitState()
     }
 

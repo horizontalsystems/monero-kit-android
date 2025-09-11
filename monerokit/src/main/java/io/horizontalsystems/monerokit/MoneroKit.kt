@@ -81,7 +81,7 @@ object KitManager {
 
 class MoneroKit(
     private val context: Context,
-    private val seed: Seed.Electrum,
+    private val seed: Seed,
     private val restoreHeight: Long,
     private val walletId: String,
     private val walletService: WalletService,
@@ -111,11 +111,16 @@ class MoneroKit(
     private var nodeInfo: NodeInfo? = null
 
     val receiveAddress: String
-        get() = try {
-            val lastUnusedSubaddress = getSubaddresses().drop(1).lastOrNull { it.txsCount == 0L }
-            lastUnusedSubaddress?.address ?: walletService.wallet?.newSubaddress ?: ""
-        } catch (_: Exception) {
-            ""
+        get() {
+            val wallet = walletService.wallet
+            return if (wallet != null) {
+                val lastUnusedSubaddress = getSubaddresses(wallet).drop(1).lastOrNull { it.txsCount == 0L }
+                lastUnusedSubaddress?.address ?: walletService.wallet?.newSubaddress ?: ""
+            } else if (seed is Seed.WatchOnly) {
+                seed.address
+            } else {
+                getAddress(seed, accountIndex, 1)
+            }
         }
 
     val balance: Long
@@ -256,6 +261,10 @@ class MoneroKit(
             return generateSubaddresses(seed, accountIndex, 2)
         }
 
+        return getSubaddresses(wallet)
+    }
+
+    private fun getSubaddresses(wallet: Wallet): List<Subaddress> {
         val list = mutableListOf<Subaddress>()
         for (i in 0..wallet.numSubaddresses) {
             wallet.getSubaddressObject(i)?.let {
@@ -317,13 +326,35 @@ class MoneroKit(
 
         val newWalletFile = File(walletFolder, walletId)
         val walletPassword = ""
-        val offset = seed.passphrase
-        val mnemonic = seed.mnemonic.joinToString(" ")
-        val newWallet = WalletManager.getInstance().recoveryWallet(newWalletFile, walletPassword, mnemonic, offset, restoreHeight)
-        val success = checkAndCloseWallet(newWallet)
+        val success = when (seed) {
+            is Seed.Bip39,
+            is Seed.Electrum -> {
+                val electrum = seed.toElectrum()
+                val offset = electrum.passphrase
+                val mnemonic = electrum.mnemonic.joinToString(" ")
+                val newWallet = WalletManager.getInstance().recoveryWallet(newWalletFile, walletPassword, mnemonic, offset, restoreHeight)
+                val success = checkAndCloseWallet(newWallet)
 
-        val walletFile = File(walletFolder, walletId)
-        walletFile.delete()
+                val walletFile = File(walletFolder, walletId)
+                walletFile.delete()
+
+                success
+            }
+
+            is Seed.WatchOnly -> {
+                val newWallet = WalletManager.getInstance().createWalletWithKeys(
+                    /* aFile = */ newWalletFile,
+                    /* password = */ walletPassword,
+                    /* language = */ "",
+                    /* restoreHeight = */ restoreHeight,
+                    /* addressString = */ seed.address,
+                    /* viewKeyString = */ seed.viewPrivateKey,
+                    /* spendKeyString = */ ""
+                )
+
+                checkAndCloseWallet(newWallet)
+            }
+        }
 
         if (success) {
             Timber.i("Created wallet in %s", newWalletFile.absolutePath)
@@ -462,6 +493,17 @@ class MoneroKit(
 
         fun getInstance(
             context: Context,
+            seed: Seed.Bip39,
+            restoreDateOrHeight: String,
+            walletId: String,
+            node: String,
+            trustNode: Boolean
+        ): MoneroKit {
+            return getInstance(context, seed.toElectrum(), restoreDateOrHeight, walletId, node, trustNode)
+        }
+
+        fun getInstance(
+            context: Context,
             seed: Seed,
             restoreDateOrHeight: String,
             walletId: String,
@@ -475,7 +517,7 @@ class MoneroKit(
 
             NetCipherHelper.createInstance(context)
 
-            return MoneroKit(context, seed.toElectrum(), restoreHeight, walletId, walletService, node, trustNode)
+            return MoneroKit(context, seed, restoreHeight, walletId, walletService, node, trustNode)
         }
 
         fun validateAddress(address: String) {
@@ -598,6 +640,8 @@ sealed class Seed {
             check(mnemonic.size in listOf(12, 18, 24)) { "Illegal Bip39 Seed" }
         }
     }
+
+    data class WatchOnly(val address: String, val viewPrivateKey: String) : Seed()
 }
 
 fun Seed.toElectrum() = when (this) {
@@ -605,6 +649,10 @@ fun Seed.toElectrum() = when (this) {
         val moneroMnemonic = CakeWalletStyleConverter.getLegacySeedFromBip39(mnemonic, passphrase)
             ?: throw IllegalArgumentException("BIP39 mnemonic can't be converted to Monero Legacy Mnemonic")
         Seed.Electrum(moneroMnemonic, "")
+    }
+
+    is Seed.WatchOnly -> {
+        throw IllegalArgumentException("WatchOnly can't be converted to Monero Legacy Mnemonic")
     }
 
     is Seed.Electrum -> this
