@@ -16,7 +16,6 @@ import io.horizontalsystems.monerokit.model.Wallet.ConnectionStatus.ConnectionSt
 import io.horizontalsystems.monerokit.model.WalletManager
 import io.horizontalsystems.monerokit.util.Helper
 import io.horizontalsystems.monerokit.util.NetCipherHelper
-import io.horizontalsystems.monerokit.util.NodeHelper
 import io.horizontalsystems.monerokit.util.RestoreHeight
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
@@ -608,6 +607,30 @@ class MoneroKit(
 
             Timber.d("Using Restore Height = %d", height)
             return height
+        }
+
+        fun deleteWallet(context: Context, walletId: String): Boolean {
+            val walletFile: File = Helper.getWalletFile(context, walletId)
+
+            return deleteWallet(walletFile)
+        }
+
+        private fun deleteWallet(walletFile: File): Boolean {
+            Timber.d("deleteWallet %s", walletFile.absolutePath)
+            val dir = walletFile.getParentFile()
+            val name = walletFile.getName()
+            var success = true
+            val cacheFile = File(dir, name)
+            if (cacheFile.exists()) {
+                success = cacheFile.delete()
+            }
+            success = File(dir, "$name.keys").delete() && success
+            val addressFile = File(dir, "$name.address.txt")
+            if (addressFile.exists()) {
+                success = addressFile.delete() && success
+            }
+            Timber.d("deleteWallet is %s", success)
+            return success
         }
 
     }

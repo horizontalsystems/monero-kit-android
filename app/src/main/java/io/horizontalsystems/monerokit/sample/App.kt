@@ -33,8 +33,8 @@ class App : Application() {
         kit = MoneroKit.getInstance(
             context = this,
             seed = Seed.Bip39("".split(" "), ""),
-            restoreDateOrHeight = "3438000",
-            walletId = "wallet_id_111",
+            restoreDateOrHeight = "3435800",
+            walletId = walletId,
             node = DefaultNodes.BOLDSUCK.uri,
             trustNode = true
         )
@@ -46,5 +46,7 @@ class App : Application() {
             private set
 
         lateinit var kit: MoneroKit
+
+        const val walletId = "wallet_id_111"
     }
 }

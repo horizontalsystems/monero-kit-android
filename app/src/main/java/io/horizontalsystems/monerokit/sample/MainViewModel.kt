@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.horizontalsystems.monerokit.MoneroKit
 import io.horizontalsystems.monerokit.SyncState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -99,7 +100,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stop() {
-        kit.stop()
+        viewModelScope.launch(Dispatchers.Default) {
+            kit.stop()
+        }
+    }
+
+    fun deleteWallet() {
+        viewModelScope.launch {
+            val result = MoneroKit.deleteWallet(App.instance, App.walletId)
+            Log.e("eee", "deleteWallet: $result")
+        }
     }
 
     fun saveState() {
