@@ -371,13 +371,12 @@ class MoneroKit(
 
     private var firstBlock: Long = 0
 
-    override fun onRefreshed(wallet: Wallet, full: Boolean): Boolean {
-        Log.e("eee", "observer.onRefreshed()\n - wallet: ${wallet.status}\n - full: $full")
+    override fun onRefreshed(wallet: Wallet, fullStatus: Wallet.Status, full: Boolean): Boolean {
+        Log.e("eee", "observer.onRefreshed()\n - wallet: ${fullStatus}\n - full: $full")
 
-
-        if (!wallet.status.isOk) {
+        if (!fullStatus.isOk) {
             _syncStateFlow.update {
-                SyncState.NotSynced(IllegalStateException(wallet.status.toString()))
+                SyncState.NotSynced(IllegalStateException(fullStatus.toString()))
             }
             return false
         }

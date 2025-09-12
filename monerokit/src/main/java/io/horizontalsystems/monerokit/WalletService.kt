@@ -6,6 +6,7 @@ import io.horizontalsystems.monerokit.data.TxData
 import io.horizontalsystems.monerokit.model.PendingTransaction
 import io.horizontalsystems.monerokit.model.TransactionInfo
 import io.horizontalsystems.monerokit.model.Wallet
+import io.horizontalsystems.monerokit.model.Wallet.Status
 import io.horizontalsystems.monerokit.model.WalletListener
 import io.horizontalsystems.monerokit.model.WalletManager
 import io.horizontalsystems.monerokit.util.Helper
@@ -30,7 +31,7 @@ class WalletService(private val context: Context) {
         private set
 
     interface Observer {
-        fun onRefreshed(wallet: Wallet, full: Boolean): Boolean
+        fun onRefreshed(wallet: Wallet, fullStatus: Status, full: Boolean): Boolean
         fun onInitialWalletState(balance: Long, txs: List<TransactionInfo?>?)
     }
 
@@ -43,7 +44,7 @@ class WalletService(private val context: Context) {
     fun getConnectionStatus(): Wallet.ConnectionStatus = connectionStatus
 
     @Synchronized
-    fun start(wallet: Wallet, trustNode: Boolean): Wallet.Status? {
+    fun start(wallet: Wallet, trustNode: Boolean): Status? {
         Timber.d("start()")
 
         running = true
@@ -53,8 +54,8 @@ class WalletService(private val context: Context) {
 
         initWallet(wallet, trustNode)
 
-        Log.e("eee", "+++++ wallet.status: ${wallet.status}")
-        val walletStatus = wallet.status
+        val walletStatus = wallet.fullStatus
+        Timber.tag("eee").e("+++++ initialized wallet status: $walletStatus")
 
         if (!walletStatus.isOk) {
             stop()
@@ -191,7 +192,7 @@ class WalletService(private val context: Context) {
                             fullRefresh = true
                         }
                     }
-                    observer?.onRefreshed(wallet, fullRefresh)
+                    observer?.onRefreshed(wallet, Status(), fullRefresh)
                 }
             }
         }
@@ -207,12 +208,19 @@ class WalletService(private val context: Context) {
                 Log.e("eee", "refreshed() wallet is NULL")
                 return
             }
+
+            val walletFullStatus = wallet.fullStatus
+            if (!walletFullStatus.isOk) {
+                observer!!.onRefreshed(wallet, walletFullStatus, false)
+                return
+            }
+
             wallet.setSynchronized() // TODO sometimes called even if sync is not complete
             if (updated) {
                 updateDaemonState(wallet, wallet.blockChainHeight)
                 wallet.refreshHistory()
                 if (observer != null) {
-                    updated = !observer!!.onRefreshed(wallet, true)
+                    updated = !observer!!.onRefreshed(wallet, walletFullStatus, true)
                 }
             }
         }
