@@ -258,6 +258,9 @@ class MoneroKit(
     fun getSubaddresses(): List<Subaddress> {
         val wallet = walletService.wallet
         if (wallet == null) {
+            if (seed is Seed.WatchOnly) {
+                return listOf(Subaddress(0, 0, seed.address, ""))
+            }
             return generateSubaddresses(seed, accountIndex, 2)
         }
 
