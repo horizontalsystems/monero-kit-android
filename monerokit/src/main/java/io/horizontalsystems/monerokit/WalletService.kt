@@ -32,7 +32,7 @@ class WalletService(private val context: Context) {
 
     interface Observer {
         fun onRefreshed(wallet: Wallet, fullStatus: Status, full: Boolean): Boolean
-        fun onInitialWalletState(balance: Long, txs: List<TransactionInfo?>?)
+        fun onInitialWalletState(balance: Balance, txs: List<TransactionInfo?>?)
     }
 
     fun setObserver(obs: Observer?) {
@@ -105,7 +105,7 @@ class WalletService(private val context: Context) {
                 try {
                     wallet.refreshHistory()
                     Log.e("eee", "+++++ history in openWallet: ${wallet.history.all.size}, balance: ${wallet.balance}")
-                    observer?.onInitialWalletState(wallet.balance, wallet.history.all)
+                    observer?.onInitialWalletState(Balance(wallet.balance, wallet.unlockedBalance), wallet.history.all)
                 } catch (err: Throwable) {
                     Log.e("eee", "+++++ error in openWallet onInitialWalletState", err)
                     Unit

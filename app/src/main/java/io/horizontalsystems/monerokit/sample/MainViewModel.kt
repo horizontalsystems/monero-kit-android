@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.horizontalsystems.monerokit.Balance
 import io.horizontalsystems.monerokit.MoneroKit
 import io.horizontalsystems.monerokit.SyncState
 import kotlinx.coroutines.Dispatchers
@@ -45,9 +46,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun updateBalance(balance: Long?) {
+    private fun updateBalance(balance: Balance?) {
         totalBalance = balance?.let {
-            scaleDown(it.toBigDecimal())
+            scaleDown(it.all.toBigDecimal())
         } ?: BigDecimal.ZERO
 
         emitState()

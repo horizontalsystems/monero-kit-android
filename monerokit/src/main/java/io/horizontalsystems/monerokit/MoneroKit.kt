@@ -98,7 +98,7 @@ class MoneroKit(
     private val _syncStateFlow = MutableStateFlow<SyncState>(SyncState.NotSynced(SyncError.NotStarted))
     val syncStateFlow = _syncStateFlow.asStateFlow()
 
-    private val _balanceFlow = MutableStateFlow<Long>(0)
+    private val _balanceFlow = MutableStateFlow(Balance(0,0))
     val balanceFlow = _balanceFlow.asStateFlow()
 
     private val _lastBlockUpdatedFlow = MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
@@ -122,7 +122,7 @@ class MoneroKit(
             }
         }
 
-    val balance: Long
+    val balance: Balance
         get() = _balanceFlow.value
 
     val lastBlockHeight: Long?
@@ -435,13 +435,15 @@ class MoneroKit(
         _lastBlockUpdatedFlow.tryEmit(Unit)
 
         _balanceFlow.update {
-            walletService.wallet?.balance ?: 0L
+            walletService.wallet.let { wallet ->
+                Balance(wallet?.balance ?: 0L, wallet?.unlockedBalance ?: 0L)
+            }
         }
 
         return true
     }
 
-    override fun onInitialWalletState(balance: Long, txs: List<TransactionInfo?>?) {
+    override fun onInitialWalletState(balance: Balance, txs: List<TransactionInfo?>?) {
         _balanceFlow.update {
             balance
         }
@@ -645,6 +647,11 @@ fun ByteArray?.toHexString(): String {
     val rawHex = this?.toRawHexString() ?: return ""
     return "0x$rawHex"
 }
+
+data class Balance(
+    val all: Long,
+    val unlocked: Long
+)
 
 data class Keys(
     val privateSpendKey: String,
