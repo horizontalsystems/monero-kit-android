@@ -296,7 +296,7 @@ class MoneroKit(
         destination: String,
         memo: String?
     ) = TxData().apply {
-        this.amount = if (amount == balance.unlocked) 0 else amount
+        this.amount = if (amount == balance.unlocked) Wallet.SWEEP_ALL else amount
         this.destination = destination
         mixin = MIXIN
         priority = PendingTransaction.Priority.Priority_Medium
