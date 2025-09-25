@@ -98,7 +98,7 @@ class MoneroKit(
     private val _syncStateFlow = MutableStateFlow<SyncState>(SyncState.NotSynced(SyncError.NotStarted))
     val syncStateFlow = _syncStateFlow.asStateFlow()
 
-    private val _balanceFlow = MutableStateFlow(Balance(0,0))
+    private val _balanceFlow = MutableStateFlow(Balance(0, 0))
     val balanceFlow = _balanceFlow.asStateFlow()
 
     private val _lastBlockUpdatedFlow = MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
@@ -280,11 +280,6 @@ class MoneroKit(
         return walletService.wallet?.getSubaddressObject(accountIndex, subaddressIndex)
     }
 
-    suspend fun test() {
-        val x = restoreHeightForNewWallet()
-        Log.e("eee", "restoreHeightForNewWallet = $x")
-    }
-
     fun getKeys(): Keys? {
         val wallet = walletService.wallet ?: return null
 
@@ -301,7 +296,7 @@ class MoneroKit(
         destination: String,
         memo: String?
     ) = TxData().apply {
-        this.amount = amount
+        this.amount = if (amount == balance.unlocked) 0 else amount
         this.destination = destination
         mixin = MIXIN
         priority = PendingTransaction.Priority.Priority_Medium
