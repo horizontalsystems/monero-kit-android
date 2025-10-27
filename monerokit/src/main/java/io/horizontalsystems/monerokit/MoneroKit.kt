@@ -419,7 +419,7 @@ class MoneroKit(
             Log.e("eee", "emit syncing: $progress, current: ${_syncStateFlow.value.description}")
 
             _syncStateFlow.update {
-                SyncState.Syncing(progress)
+                SyncState.Syncing(progress, remainingBlocks)
             }
         } else {
             _syncStateFlow.update {
