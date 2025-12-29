@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
 public class RestoreHeight {
     static final int DIFFICULTY_TARGET = 120; // seconds
 
-    static private RestoreHeight Singleton = null;
+    static private volatile RestoreHeight Singleton = null;
 
     static public RestoreHeight getInstance() {
         if (Singleton == null) {
