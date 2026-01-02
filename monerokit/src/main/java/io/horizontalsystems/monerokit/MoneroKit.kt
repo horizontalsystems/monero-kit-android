@@ -388,7 +388,11 @@ class MoneroKit(
         if (wallet.isSynchronized) {
             Log.e("eee", "wallet is synced, first sync = ${!synced}")
             if (!synced) { // first sync
-                walletService.storeWallet() // save on first sync
+                while (savingState.getAndSet(true)) {
+                    Thread.sleep(1000)
+                }
+                walletService.storeWallet()
+                savingState.set(false)
                 synced = true
             }
         }
