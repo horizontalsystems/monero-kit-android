@@ -46,6 +46,14 @@ public class TransactionHistory {
         }
     }
 
+    private void loadTxKeys(Wallet wallet) {
+        for (TransactionInfo info : transactions) {
+            if (info.direction == TransactionInfo.Direction.Direction_Out) {
+                info.txKey = wallet.getTxKey(info.hash);
+            }
+        }
+    }
+
     public native int getCount(); // over all accounts/subaddresses
 
     //private native long getTransactionByIndexJ(int i);
@@ -61,6 +69,7 @@ public class TransactionHistory {
     public void refreshWithNotes(Wallet wallet) {
         refresh();
         loadNotes(wallet);
+        loadTxKeys(wallet);
     }
 
     private void refresh() {
