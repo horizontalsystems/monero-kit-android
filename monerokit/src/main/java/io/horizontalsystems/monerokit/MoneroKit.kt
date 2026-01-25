@@ -232,6 +232,26 @@ class MoneroKit(
         savingState.set(false)
     }
 
+    fun rescanBlockchain(restoreHeight: Long) {
+        val wallet = walletService.wallet ?: throw IllegalStateException("Wallet is NULL")
+
+        synced = false
+        firstBlock = 0
+
+        _syncStateFlow.update {
+            SyncState.Syncing(0.0, 0)
+        }
+
+        while (savingState.getAndSet(true)) {
+            Thread.sleep(100)
+        }
+        wallet.setRestoreHeight(restoreHeight)
+        wallet.store()
+        savingState.set(false)
+
+        wallet.rescanBlockchainAsync()
+    }
+
     fun send(
         amount: Long,
         address: String,
