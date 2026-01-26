@@ -311,6 +311,12 @@ class MoneroKit(
         )
     }
 
+    fun getTxKey(txHash: String): String? {
+        val wallet = walletService.wallet ?: return null
+        val key = wallet.getTxKey(txHash)
+        return if (key.isNullOrEmpty()) null else key
+    }
+
     private fun buildTxData(
         amount: Long,
         destination: String,
