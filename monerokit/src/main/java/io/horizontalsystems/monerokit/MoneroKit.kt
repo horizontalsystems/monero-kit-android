@@ -27,14 +27,20 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
+
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import okio.withLock
 import timber.log.Timber
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.ReentrantLock
+import java.util.concurrent.locks.ReentrantReadWriteLock
+
+
 
 
 object KitManager {
@@ -179,11 +185,32 @@ class MoneroKit(
             Log.e("eee", "++++++ kit.startX($walletId, $kitId) after createWalletIfNotExists()")
 
             walletService.setObserver(this@MoneroKit)
-            val wallet = walletService.openWallet(walletId, "")
+            var wallet = walletService.openWallet(walletId, "")
             if (wallet == null) {
                 _syncStateFlow.update { SyncState.NotSynced(SyncError.InvalidNode("Invalid wallet")) }
                 return false
             }
+
+            if (wallet.restoreHeight != restoreHeight) {
+                Log.e("eee", "%%%%%% wallet restoreHeight (${wallet.restoreHeight}) != restoreHeight ($restoreHeight)")
+
+                walletService.stop()
+
+                val deleteWalletResult = deleteWallet(context, walletId)
+
+                Log.e("eee", "%%%%%% wallet deleted: $deleteWalletResult")
+
+                createWalletIfNotExists()
+
+                walletService.setObserver(this@MoneroKit)
+                wallet = walletService.openWallet(walletId, "")
+                if (wallet == null) {
+                    _syncStateFlow.update { SyncState.NotSynced(SyncError.InvalidNode("Invalid wallet")) }
+                    return false
+                }
+            }
+
+            Log.e("eee", "++++++ kit.startX($walletId, $kitId) wallet opened: restoreHeight = ${wallet.restoreHeight}")
 
             val selectedNode = if (nodeInfo != null) {
                 nodeInfo
@@ -395,7 +422,7 @@ class MoneroKit(
     override fun onRefreshed(wallet: Wallet, fullStatus: Wallet.Status, full: Boolean): Boolean {
         Log.e("eee", "observer.onRefreshed()\n - wallet: ${fullStatus}\n - full: $full")
 
-        if (!fullStatus.isOk) {
+        if (!fullStatus.isOk && fullStatus.errorString != "no tx keys found for this txid") {
             _syncStateFlow.update {
                 SyncState.NotSynced(IllegalStateException(fullStatus.toString()))
             }
@@ -446,7 +473,10 @@ class MoneroKit(
                 1.0
             }
 
-            Log.e("eee", "emit syncing: $progress, current: ${_syncStateFlow.value.description}")
+            Log.e(
+                "eee",
+                "emit syncing: $progress, current: ${_syncStateFlow.value.description}, synced until: ${walletService.wallet?.blockChainHeight}, restoreHeight: ${walletService.wallet?.restoreHeight}"
+            )
 
             _syncStateFlow.update {
                 SyncState.Syncing(progress, remainingBlocks)
