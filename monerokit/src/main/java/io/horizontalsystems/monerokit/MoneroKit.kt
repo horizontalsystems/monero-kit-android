@@ -466,7 +466,7 @@ class MoneroKit(
                 walletHeight,
                 remainingBlocks
             )
-            val totalBlocks = daemonHeight - firstBlock
+            val totalBlocks = daemonHeight - restoreHeight
             val progress: Double = if (totalBlocks > 0) {
                 1 - remainingBlocks.toDouble() / totalBlocks
             } else {
@@ -478,8 +478,18 @@ class MoneroKit(
                 "emit syncing: $progress, current: ${_syncStateFlow.value.description}, synced until: ${walletService.wallet?.blockChainHeight}, restoreHeight: ${walletService.wallet?.restoreHeight}"
             )
 
-            _syncStateFlow.update {
-                SyncState.Syncing(progress, remainingBlocks)
+            if (daemonHeight <= 0L || totalBlocks <= 0L) {
+                _syncStateFlow.update {
+                    SyncState.Syncing(null, null)
+                }
+            } else if (remainingBlocks <= 0L) {
+                _syncStateFlow.update {
+                    SyncState.Syncing(1.0, 0)
+                }
+            } else {
+                _syncStateFlow.update {
+                    SyncState.Syncing(progress, remainingBlocks)
+                }
             }
         } else {
             _syncStateFlow.update {
