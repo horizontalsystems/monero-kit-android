@@ -458,7 +458,7 @@ class MoneroKit(
                 "emit syncing: $progress, current: ${_syncStateFlow.value.description}, synced until: ${walletService.wallet?.blockChainHeight}, restoreHeight: ${walletService.wallet?.restoreHeight}"
             )
 
-            if (daemonHeight <= 0L || totalBlocks <= 0L) {
+            if (daemonHeight <= 0L || totalBlocks <= 0L || progress <= 0) {
                 _syncStateFlow.update {
                     SyncState.Syncing(null, null)
                 }
