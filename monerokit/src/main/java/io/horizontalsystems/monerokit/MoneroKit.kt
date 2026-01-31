@@ -397,7 +397,7 @@ class MoneroKit(
     override fun onRefreshed(wallet: Wallet, fullStatus: Wallet.Status, full: Boolean): Boolean {
         Log.e("eee", "observer.onRefreshed()\n - wallet: ${fullStatus}\n - full: $full")
 
-        if (!fullStatus.isOk && fullStatus.errorString != "no tx keys found for this txid") {
+        if (!fullStatus.isOk) {
             _syncStateFlow.update {
                 SyncState.NotSynced(IllegalStateException(fullStatus.toString()))
             }

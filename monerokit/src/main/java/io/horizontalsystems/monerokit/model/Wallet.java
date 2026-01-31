@@ -80,7 +80,9 @@ public class Wallet {
         }
 
         public boolean isOk() {
-            return (getStatus() == StatusEnum.Status_Ok) && ((getConnectionStatus() == null) || (getConnectionStatus() == ConnectionStatus.ConnectionStatus_Connected));
+            boolean statusOk = (getStatus() == StatusEnum.Status_Ok) ||
+                    "no tx keys found for this txid".equals(getErrorString());
+            return statusOk && ((getConnectionStatus() == null) || (getConnectionStatus() == ConnectionStatus.ConnectionStatus_Connected));
         }
 
         @Override
