@@ -21,6 +21,7 @@ import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
@@ -43,7 +44,7 @@ public class RestoreHeight {
 
     private final Map<String, Long> blockheight = new HashMap<>();
 
-     private RestoreHeight() {
+    private RestoreHeight() {
         blockheight.put("2014-05-01", 18844L);
         blockheight.put("2014-06-01", 65406L);
         blockheight.put("2014-07-01", 108882L);
@@ -153,12 +154,42 @@ public class RestoreHeight {
         blockheight.put("2023-03-01", 2832118L);
         blockheight.put("2023-04-01", 2854365L);
         blockheight.put("2023-05-01", 2875972L);
+        blockheight.put("2023-06-01", 2898234L);
+        blockheight.put("2023-07-01", 2919771L);
+        blockheight.put("2023-08-01", 2942045L);
+        blockheight.put("2023-09-01", 2964280L);
+        blockheight.put("2023-10-01", 2985937L);
+        blockheight.put("2023-11-01", 3008178L);
+        blockheight.put("2023-12-01", 3029759L);
+        blockheight.put("2024-01-01", 3051991L);
+        blockheight.put("2024-02-01", 3074316L);
+        blockheight.put("2024-03-01", 3095123L);
+        blockheight.put("2024-04-01", 3117427L);
+        blockheight.put("2024-05-01", 3139022L);
+        blockheight.put("2024-06-01", 3161279L);
+        blockheight.put("2024-07-01", 3182945L);
+        blockheight.put("2024-08-01", 3205207L);
+        blockheight.put("2024-09-01", 3227566L);
+        blockheight.put("2024-10-01", 3249124L);
+        blockheight.put("2024-11-01", 3271454L);
+        blockheight.put("2024-12-01", 3293087L);
+        blockheight.put("2025-01-01", 3315383L);
+        blockheight.put("2025-02-01", 3337734L);
+        blockheight.put("2025-03-01", 3357843L);
+        blockheight.put("2025-04-01", 3380178L);
+        blockheight.put("2025-05-01", 3401714L);
+        blockheight.put("2025-06-01", 3424052L);
+        blockheight.put("2025-07-01", 3445678L);
+        blockheight.put("2025-08-01", 3467960L);
         blockheight.put("2025-09-01", 3490175L);
-        blockheight.put("2025-12-29", 3575753L);
+        blockheight.put("2025-10-01", 3511714L);
+        blockheight.put("2025-11-01", 3533988L);
+        blockheight.put("2025-12-01", 3555615L);
+        blockheight.put("2026-01-01", 3577876L);
     }
 
     public long getHeight(String date) {
-        SimpleDateFormat parser = new SimpleDateFormat("yyyy-MM-dd");
+        SimpleDateFormat parser = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
         parser.setTimeZone(TimeZone.getTimeZone("UTC"));
         parser.setLenient(false);
         try {
@@ -223,5 +254,44 @@ public class RestoreHeight {
             height = Math.round(prevBc + 1.0 * days * (24f * 60 * 60 / DIFFICULTY_TARGET));
         }
         return height;
+    }
+
+    public Date getDate(final long height) {
+        if (height <= 0) {
+            return null;
+        }
+
+        SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+        formatter.setTimeZone(TimeZone.getTimeZone("UTC"));
+
+        // Find the closest known blockheight that is less than or equal to the given height
+        String closestDate = null;
+        long closestHeight = 0;
+
+        for (Map.Entry<String, Long> entry : blockheight.entrySet()) {
+            long h = entry.getValue();
+            if (h <= height && h > closestHeight) {
+                closestHeight = h;
+                closestDate = entry.getKey();
+            }
+        }
+
+        if (closestDate == null) {
+            return null;
+        }
+
+        try {
+            Date baseDate = formatter.parse(closestDate);
+            long blockDiff = height - closestHeight;
+            long secondsDiff = blockDiff * DIFFICULTY_TARGET;
+
+            Calendar cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+            cal.setTime(baseDate);
+            cal.add(Calendar.SECOND, (int) secondsDiff);
+
+            return cal.getTime();
+        } catch (ParseException ex) {
+            return null;
+        }
     }
 }

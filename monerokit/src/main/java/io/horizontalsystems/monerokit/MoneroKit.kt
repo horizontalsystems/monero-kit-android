@@ -27,20 +27,15 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
-
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import okio.withLock
 import timber.log.Timber
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.locks.ReentrantLock
-import java.util.concurrent.locks.ReentrantReadWriteLock
-
-
 
 
 object KitManager {
@@ -621,6 +616,14 @@ class MoneroKit(
 
         fun restoreHeightForNewWallet(): Long {
             return RestoreHeight.getInstance().getHeight(Calendar.getInstance().getTime())
+        }
+
+        fun restoreHeightForDate(date: Date): Long {
+            return RestoreHeight.getInstance().getHeight(date)
+        }
+
+        fun dateForRestoreHeight(height: Long): Date? {
+            return RestoreHeight.getInstance().getDate(height)
         }
 
         private fun getHeight(input: String): Long {
