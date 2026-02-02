@@ -111,7 +111,6 @@ class WalletService(private val context: Context) {
                     Unit
                 }
                 this.wallet = wallet
-                Log.e("eee", "+++++ wallet opened: ${wallet.restoreHeight}")
                 wallet
             }
         } else {

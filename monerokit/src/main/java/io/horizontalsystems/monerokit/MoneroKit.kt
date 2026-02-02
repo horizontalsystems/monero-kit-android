@@ -187,13 +187,9 @@ class MoneroKit(
             }
 
             if (wallet.restoreHeight != restoreHeight) {
-                Log.e("eee", "%%%%%% wallet restoreHeight (${wallet.restoreHeight}) != restoreHeight ($restoreHeight)")
-
                 walletService.stop()
 
                 val deleteWalletResult = deleteWallet(context, walletId)
-
-                Log.e("eee", "%%%%%% wallet deleted: $deleteWalletResult")
 
                 createWalletIfNotExists()
 
@@ -204,8 +200,6 @@ class MoneroKit(
                     return false
                 }
             }
-
-            Log.e("eee", "++++++ kit.startX($walletId, $kitId) wallet opened: restoreHeight = ${wallet.restoreHeight}")
 
             val selectedNode = if (nodeInfo != null) {
                 nodeInfo
