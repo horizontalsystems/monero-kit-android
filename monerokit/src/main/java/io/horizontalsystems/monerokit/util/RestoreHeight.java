@@ -257,12 +257,17 @@ public class RestoreHeight {
     }
 
     public Date getDate(final long height) {
-        if (height <= 0) {
-            return null;
-        }
-
         SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
         formatter.setTimeZone(TimeZone.getTimeZone("UTC"));
+
+        // Return genesis date for blocks before the first known height
+        if (height < 18844) {
+            try {
+                return formatter.parse("2014-04-18");
+            } catch (ParseException ex) {
+                return null;
+            }
+        }
 
         // Find the closest known blockheight that is less than or equal to the given height
         String closestDate = null;
