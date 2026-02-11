@@ -290,11 +290,10 @@ public class RestoreHeight {
             long blockDiff = height - closestHeight;
             long secondsDiff = blockDiff * DIFFICULTY_TARGET;
 
-            Calendar cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-            cal.setTime(baseDate);
-            cal.add(Calendar.SECOND, (int) secondsDiff);
+            long baseMillis = baseDate.getTime();
+            long offsetMillis = secondsDiff * 1000L;
 
-            return cal.getTime();
+            return new Date(baseMillis + offsetMillis);
         } catch (ParseException ex) {
             return null;
         }
