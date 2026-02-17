@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.4.1)
 project(monerujo)
 message(STATUS ABI_INFO  = ${ANDROID_ABI})
 set(CMAKE_VERBOSE_MAKEFILE ON)
+set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,max-page-size=16384")
 add_library( monerujo
              SHARED
              src/main/cpp/monerujo.cpp )
