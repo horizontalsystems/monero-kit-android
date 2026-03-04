@@ -212,7 +212,7 @@ public class RestoreHeight {
 
         Calendar query = (Calendar) cal.clone();
 
-        SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd");
+        SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
         formatter.setTimeZone(TimeZone.getTimeZone("UTC"));
 
         String queryDate = formatter.format(date);
