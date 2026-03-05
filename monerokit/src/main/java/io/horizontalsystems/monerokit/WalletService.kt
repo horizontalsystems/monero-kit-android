@@ -68,8 +68,15 @@ class WalletService(private val context: Context) {
 
     @Synchronized
     fun storeWallet() {
-        val success = wallet?.store()
+        val success = wallet?.storeWithPausedRefresh()
         Timber.d("Wallet stored: $success")
+    }
+
+    private fun Wallet.storeWithPausedRefresh(): Boolean {
+        pauseRefresh()
+        val result = store()
+        startRefresh()
+        return result
     }
 
     @Synchronized
@@ -269,7 +276,7 @@ class WalletService(private val context: Context) {
                 wallet.setUserNote(txId, notes)
             }
 
-            val rc = wallet.store()
+            val rc = wallet.storeWithPausedRefresh()
             Timber.d("wallet stored: %s with rc=%b", wallet.name, rc)
             if (!rc) {
                 Timber.w("Wallet store failed: %s", wallet.status.errorString)
