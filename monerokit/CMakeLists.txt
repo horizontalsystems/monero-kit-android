@@ -7,6 +7,8 @@ add_library( monerujo
              SHARED
              src/main/cpp/monerujo.cpp )
 
+target_link_options(monerujo PRIVATE "-Wl,--build-id=none")
+
 set(EXTERNAL_LIBS_DIR ${CMAKE_SOURCE_DIR}/external-libs)
 
 ############
