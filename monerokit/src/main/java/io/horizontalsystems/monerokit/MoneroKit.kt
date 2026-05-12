@@ -17,7 +17,10 @@ import io.horizontalsystems.monerokit.model.WalletManager
 import io.horizontalsystems.monerokit.util.Helper
 import io.horizontalsystems.monerokit.util.NetCipherHelper
 import io.horizontalsystems.monerokit.util.RestoreHeight
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -26,8 +29,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
@@ -35,6 +37,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.UUID
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MoneroKit(
@@ -49,7 +52,8 @@ class MoneroKit(
 
     private val kitId = UUID.randomUUID().toString()
     private val accountIndex = 0
-    private val startStopMutex = Mutex()
+    private val lifecycleDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+    private val lifecycleScope = CoroutineScope(lifecycleDispatcher + SupervisorJob())
     private var started = false
     private var savingState = AtomicBoolean(false)
     private var synced = false
@@ -90,51 +94,37 @@ class MoneroKit(
         else
             null
 
-    suspend fun start() {
-        startStopMutex.withLock {
-            if (started) return
+    fun start() { lifecycleScope.launch { _start() } }
+    fun stop()  { lifecycleScope.launch { _stop() } }
 
-            _syncStateFlow.update {
-                SyncState.Connecting(true)
-            }
+    private suspend fun _start() {
+        if (started) return
+        started = true
 
-            var kitState = KitManager.checkAndGetInitialState(kitId)
+        _syncStateFlow.update { SyncState.Connecting(true) }
 
-            Log.e("eee", "++++++ kit.start($walletId, $kitId) initial kitState: $kitState")
-            while (kitState == KitState.Waiting) {
-                delay(1000)
-                kitState = KitManager.checkAndGetState(kitId)
-                Log.e("eee", "++++++ kit.start($walletId, $kitId) waiting kitState: $kitState")
-            }
-
-            if (kitState == KitState.Running) {
-                _syncStateFlow.update {
-                    SyncState.Connecting(false)
-                }
-                started = startInternal()
-            }
+        var kitState = KitManager.checkAndGetInitialState(kitId)
+        Log.e("eee", "++++++ kit.start($walletId, $kitId) initial kitState: $kitState")
+        while (kitState == KitState.Waiting) {
+            delay(1000)
+            if (!started) return  // stop() was called while waiting
+            kitState = KitManager.checkAndGetState(kitId)
+            Log.e("eee", "++++++ kit.start($walletId, $kitId) waiting kitState: $kitState")
         }
+
+        if (kitState != KitState.Running) return
+
+        _syncStateFlow.update { SyncState.Connecting(false) }
+        startInternal()
     }
 
-    suspend fun stop() {
-        // Clear our slot in KitManager before acquiring the mutex so the waiting loop
-        // inside start() sees Obsolete on its next checkAndGetState poll and exits
-        // without calling startInternal(). This prevents a stopped-but-waiting kit from
-        // unnecessarily starting and blocking the intended (newer) kit.
-        KitManager.removeWaiting(kitId)
-
-        startStopMutex.withLock {
-            if (!started) {
-                KitManager.removeRunning(kitId)
-                return
-            }
-
-            delay(1000)
-            stopInternal()
-            KitManager.removeRunning(kitId)
-
-            started = false
-        }
+    private suspend fun _stop() {
+        if (!started) return
+        started = false
+        Log.e("eee", "----- kit.stop($walletId, $kitId)")
+        delay(1000)
+        stopInternal()
+        KitManager.removeRunning(kitId)
     }
 
     private suspend fun startInternal(): Boolean {

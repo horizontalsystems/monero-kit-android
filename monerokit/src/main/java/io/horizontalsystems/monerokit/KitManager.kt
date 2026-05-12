@@ -39,11 +39,5 @@ object KitManager {
         }
     }
 
-    fun removeWaiting(kitId: String) = lock.withLock {
-        if (waitingKitId == kitId) {
-            waitingKitId = null
-        }
-    }
-
     fun isRunning(kitId: String): Boolean = lock.withLock { runningKitId == kitId }
 }
