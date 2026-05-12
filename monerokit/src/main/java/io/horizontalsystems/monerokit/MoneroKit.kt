@@ -37,48 +37,6 @@ import java.util.Date
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
-
-object KitManager {
-
-    enum class KitState {
-        Running, Waiting, Obsolete
-    }
-
-    private var runningKitId: String? = null
-    private var waitingKitId: String? = null
-
-    @Synchronized
-    fun checkAndGetInitialState(kitId: String) =
-        if (runningKitId != null && runningKitId != kitId) {
-            waitingKitId = kitId
-            KitState.Waiting
-        } else {
-            runningKitId = kitId
-            KitState.Running
-        }
-
-    @Synchronized
-    fun checkAndGetState(kitId: String) =
-        if (runningKitId != null && runningKitId != kitId) {
-            if (waitingKitId != null && waitingKitId == kitId) {
-                KitState.Waiting
-            } else {
-                KitState.Obsolete
-            }
-        } else {
-            runningKitId = kitId
-            KitState.Running
-        }
-
-    @Synchronized
-    fun removeRunning(kitId: String) {
-        if (runningKitId == kitId) {
-            runningKitId = waitingKitId
-            waitingKitId = null
-        }
-    }
-}
-
 class MoneroKit(
     private val context: Context,
     private val seed: Seed,
@@ -159,6 +117,12 @@ class MoneroKit(
     }
 
     suspend fun stop() {
+        // Clear our slot in KitManager before acquiring the mutex so the waiting loop
+        // inside start() sees Obsolete on its next checkAndGetState poll and exits
+        // without calling startInternal(). This prevents a stopped-but-waiting kit from
+        // unnecessarily starting and blocking the intended (newer) kit.
+        KitManager.removeWaiting(kitId)
+
         startStopMutex.withLock {
             if (!started) {
                 KitManager.removeRunning(kitId)
