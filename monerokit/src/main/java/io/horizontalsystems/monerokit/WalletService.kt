@@ -11,7 +11,6 @@ import io.horizontalsystems.monerokit.model.WalletListener
 import io.horizontalsystems.monerokit.model.WalletManager
 import io.horizontalsystems.monerokit.util.Helper
 import io.horizontalsystems.monerokit.util.NetCipherHelper
-import timber.log.Timber
 
 class WalletService(private val context: Context) {
 
@@ -37,7 +36,6 @@ class WalletService(private val context: Context) {
 
     fun setObserver(obs: Observer?) {
         observer = obs
-        Timber.d("Observer set: %s", observer)
     }
 
     fun getDaemonHeight(): Long = daemonHeight
@@ -45,17 +43,12 @@ class WalletService(private val context: Context) {
 
     @Synchronized
     fun start(wallet: Wallet, trustNode: Boolean): Status? {
-        Timber.d("start()")
-
         running = true
         this.wallet = wallet
-
-        Timber.d("wallet address %s, restore height: %d", wallet.address, wallet.restoreHeight)
 
         initWallet(wallet, trustNode)
 
         val walletStatus = wallet.fullStatus
-        Timber.tag("eee").e("+++++ initialized wallet status: $walletStatus")
 
         if (!walletStatus.isOk) {
             stop()
@@ -68,8 +61,7 @@ class WalletService(private val context: Context) {
 
     @Synchronized
     fun storeWallet() {
-        val success = wallet?.storeWithPausedRefresh()
-        Timber.d("Wallet stored: $success")
+        wallet?.storeWithPausedRefresh()
     }
 
     private fun Wallet.storeWithPausedRefresh(): Boolean {
@@ -81,15 +73,9 @@ class WalletService(private val context: Context) {
 
     @Synchronized
     fun stop() {
-        Timber.d("stop() listener: $listener")
         setObserver(null)
         listener?.stop()
-        Timber.d("stop wallet: ${wallet?.name}")
-        wallet?.let { wallet ->
-            Timber.d("Closing wallet")
-            wallet.close()
-            Timber.d("Wallet closed")
-        }
+        wallet?.close()
         wallet = null
         listener = null
         running = false
@@ -98,36 +84,28 @@ class WalletService(private val context: Context) {
     fun openWallet(walletName: String, walletPassword: String): Wallet? {
         val path = Helper.getWalletFile(context, walletName).absolutePath
         val walletMgr = WalletManager.getInstance()
-        Timber.d("WalletManager network=%s", walletMgr.networkType.name)
 
         return if (walletMgr.walletExists(path)) {
-            Timber.d("open wallet %s", path)
             val wallet = walletMgr.openWallet(path, walletPassword)
-            Timber.d("wallet opened")
             if (!wallet.status.isOk) {
-                Timber.d("wallet status is %s", wallet.status)
                 walletMgr.close(wallet)
                 null
             } else {
                 try {
                     wallet.refreshHistory()
-                    Log.e("eee", "+++++ history in openWallet: ${wallet.history.all.size}, balance: ${wallet.balance}")
                     observer?.onInitialWalletState(Balance(wallet.balance, wallet.unlockedBalance), wallet.history.all)
                 } catch (err: Throwable) {
-                    Log.e("eee", "+++++ error in openWallet onInitialWalletState", err)
-                    Unit
+                    Log.e("WalletService", "error in onInitialWalletState", err)
                 }
                 this.wallet = wallet
                 wallet
             }
         } else {
-            Timber.d("service.openWallet wallet path does not exists %s", path)
             null
         }
     }
 
     private fun initWallet(wallet: Wallet, trustNode: Boolean) {
-        Timber.d("Using daemon %s", WalletManager.getInstance().daemonAddress)
         wallet.init(0)
         wallet.setTrustedDaemon(trustNode)
         wallet.setProxy(NetCipherHelper.getProxy())
@@ -155,36 +133,27 @@ class WalletService(private val context: Context) {
         private var lastTxCount = 0
 
         fun start() {
-            Timber.d("WalletListener.start()")
             val wallet = wallet ?: throw IllegalStateException("No wallet!")
             wallet.setListener(this)
             wallet.startRefresh()
         }
 
         fun stop() {
-            Timber.d("WalletListener.stop()")
-            val wallet = wallet ?: run {
-                Log.e("eee", "stop() wallet is NULL")
-                return
-            }
+            val wallet = wallet ?: return
             wallet.pauseRefresh()
             wallet.setListener(null)
         }
 
-        override fun moneySpent(txId: String, amount: Long) = Timber.d("moneySpent() $amount @ $txId")
-        override fun moneyReceived(txId: String, amount: Long) = Timber.d("moneyReceived() $amount @ $txId")
-        override fun unconfirmedMoneyReceived(txId: String, amount: Long) = Timber.d("unconfirmedMoneyReceived() $amount @ $txId")
+        override fun moneySpent(txId: String, amount: Long) {}
+        override fun moneyReceived(txId: String, amount: Long) {}
+        override fun unconfirmedMoneyReceived(txId: String, amount: Long) {}
 
         override fun newBlock(height: Long) {
-            val wallet = wallet ?: run {
-                Log.e("eee", "newBlock() wallet is NULL")
-                return
-            }
+            val wallet = wallet ?: return
 
             // don't flood with an update for every block ...
             if (lastBlockTime < System.currentTimeMillis() - 2000) {
                 lastBlockTime = System.currentTimeMillis()
-                Timber.d("newBlock() @ %d with observer %s", height, observer)
                 if (observer != null) {
                     var fullRefresh = false
                     updateDaemonState(wallet, if (wallet.isSynchronized) height else 0)
@@ -205,16 +174,11 @@ class WalletService(private val context: Context) {
         }
 
         override fun updated() {
-            Timber.d("updated()")
             updated = true
         }
 
         override fun refreshed() {
-            Timber.d("refreshed() updated= %b", updated)
-            val wallet = wallet ?: run {
-                Log.e("eee", "refreshed() wallet is NULL")
-                return
-            }
+            val wallet = wallet ?: return
 
             val walletFullStatus = wallet.fullStatus
             if (!walletFullStatus.isOk) {
@@ -234,11 +198,7 @@ class WalletService(private val context: Context) {
     }
 
     fun createTransaction(txData: TxData) {
-        val wallet = wallet ?: run {
-            Log.e("eee", "createTransaction() wallet is NULL")
-            throw IllegalStateException("Create Transaction failed: Wallet is NULL")
-        }
-        Timber.d("CREATE TX for wallet: %s", wallet.name)
+        val wallet = wallet ?: throw IllegalStateException("Create Transaction failed: Wallet is NULL")
 
         wallet.disposePendingTransaction()
         txData.createPocketChange(wallet)
@@ -246,24 +206,16 @@ class WalletService(private val context: Context) {
         val pendingTransaction = wallet.createTransaction(txData)
         val status = pendingTransaction.status
         if (status !== PendingTransaction.Status.Status_Ok) {
-            Timber.e("Create Transaction failed: %s", pendingTransaction.getErrorString())
             throw IllegalStateException("Create Transaction failed: ${pendingTransaction.getErrorString()}")
         }
     }
 
     fun sendTransaction(notes: String?) {
-        val wallet = wallet ?: run {
-            Log.e("eee", "sendTransaction() wallet is NULL")
-            throw IllegalStateException("Send Transaction failed: Wallet is NULL")
-        }
-
-        Timber.d("SEND TX for wallet: %s", wallet.name)
+        val wallet = wallet ?: throw IllegalStateException("Send Transaction failed: Wallet is NULL")
 
         val pendingTransaction = wallet.pendingTransaction
         requireNotNull(pendingTransaction) { "PendingTransaction is null" }
         if (pendingTransaction.status !== PendingTransaction.Status.Status_Ok) {
-            Timber.e("PendingTransaction is %s", pendingTransaction.status)
-
             wallet.disposePendingTransaction()
             throw IllegalStateException("Send Transaction failed: ${pendingTransaction.getErrorString()}")
         }
@@ -275,12 +227,7 @@ class WalletService(private val context: Context) {
             if (!notes.isNullOrEmpty()) {
                 wallet.setUserNote(txId, notes)
             }
-
-            val rc = wallet.storeWithPausedRefresh()
-            Timber.d("wallet stored: %s with rc=%b", wallet.name, rc)
-            if (!rc) {
-                Timber.w("Wallet store failed: %s", wallet.status.errorString)
-            }
+            wallet.storeWithPausedRefresh()
             listener?.updated = true
         } else {
             val error = pendingTransaction.getErrorString()
