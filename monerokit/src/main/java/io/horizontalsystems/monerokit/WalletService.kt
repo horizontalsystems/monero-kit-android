@@ -78,11 +78,11 @@ class WalletService(private val context: Context) {
     @Synchronized
     fun stop() {
         setObserver(null)
-        listener?.stop()  // calls wallet.pauseRefresh()
+        listener?.stop()  // calls wallet.pauseRefresh() — async
+        // Always wait for the native refresh thread to finish its current
+        // iteration before store() or close() touch wallet data structures.
+        Thread.sleep(500)
         if (pendingSave.getAndSet(false)) {
-            // Last-resort save before close. listener.stop() already called
-            // pauseRefresh(); sleep gives the native thread time to quiesce.
-            Thread.sleep(500)
             wallet?.store()
         }
         wallet?.close()
