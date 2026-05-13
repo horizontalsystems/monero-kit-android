@@ -137,20 +137,9 @@ class MoneroKit(
 
             walletService.setObserver(this@MoneroKit)
             var wallet = walletService.openWallet(walletId, "")
-            if (wallet == null) {
-                _syncStateFlow.update { SyncState.NotSynced(SyncError.InvalidNode("Invalid wallet")) }
-                return false
-            }
 
-            if (wallet.restoreHeight != restoreHeight) {
-                walletService.stop()
-                storage.clearAll()
-                deleteWalletFiles(context, walletId)
-
-                createWalletIfNotExists()
-
-                walletService.setObserver(this@MoneroKit)
-                wallet = walletService.openWallet(walletId, "")
+            if (wallet == null || wallet.restoreHeight != restoreHeight) {
+                wallet = recreateAndOpenWallet()
                 if (wallet == null) {
                     _syncStateFlow.update { SyncState.NotSynced(SyncError.InvalidNode("Invalid wallet")) }
                     return false
@@ -182,6 +171,15 @@ class MoneroKit(
             _syncStateFlow.update { SyncState.NotSynced(SyncError.StartError(ex.message ?: ex.javaClass.simpleName)) }
             return false
         }
+    }
+
+    private suspend fun recreateAndOpenWallet(): Wallet? {
+        walletService.stop()
+        storage.clearAll()
+        deleteWalletFiles(context, walletId)
+        createWalletIfNotExists()
+        walletService.setObserver(this@MoneroKit)
+        return walletService.openWallet(walletId, "")
     }
 
     private fun stopInternal() {
@@ -280,16 +278,14 @@ class MoneroKit(
     }
 
     private suspend fun createWalletIfNotExists() = withContext(Dispatchers.IO) {
-        // check if the wallet we want to create already exists
         val walletFolder: File = Helper.getWalletRoot(context)
         if (!walletFolder.isDirectory) {
             return@withContext
         }
-        val cacheFile = File(walletFolder, walletId)
         val keysFile = File(walletFolder, "$walletId.keys")
-        val addressFile = File(walletFolder, "$walletId.address.txt")
 
-        if (cacheFile.exists() || keysFile.exists() || addressFile.exists()) {
+        // walletExists() in the native layer checks only the .keys file
+        if (keysFile.exists()) {
             return@withContext
         }
 
