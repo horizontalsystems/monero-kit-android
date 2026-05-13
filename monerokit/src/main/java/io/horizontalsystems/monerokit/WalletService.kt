@@ -182,7 +182,7 @@ class WalletService(private val context: Context) {
 
             val walletFullStatus = wallet.fullStatus
             if (!walletFullStatus.isOk) {
-                observer!!.onRefreshed(wallet, walletFullStatus, false)
+                observer?.onRefreshed(wallet, walletFullStatus, false)
                 return
             }
 
@@ -190,8 +190,8 @@ class WalletService(private val context: Context) {
             if (updated) {
                 updateDaemonState(wallet, wallet.blockChainHeight)
                 wallet.refreshHistory()
-                if (observer != null) {
-                    updated = !observer!!.onRefreshed(wallet, walletFullStatus, true)
+                observer?.let {
+                    updated = !it.onRefreshed(wallet, walletFullStatus, true)
                 }
             }
         }
