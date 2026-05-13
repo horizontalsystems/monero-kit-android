@@ -39,7 +39,6 @@ import java.util.Calendar
 import java.util.Date
 import java.util.UUID
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 
 class MoneroKit(
     private val context: Context,
@@ -57,7 +56,6 @@ class MoneroKit(
     private val lifecycleDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val lifecycleScope = CoroutineScope(lifecycleDispatcher + SupervisorJob())
     private var started = false
-    private var savingState = AtomicBoolean(false)
     private var synced = false
 
     private val _syncStateFlow = MutableStateFlow<SyncState>(SyncState.NotSynced(SyncError.NotStarted))
@@ -191,11 +189,7 @@ class MoneroKit(
     }
 
     fun saveState() {
-        if (savingState.getAndSet(true)) return
-
-        walletService.storeWallet()
-
-        savingState.set(false)
+        walletService.requestSave()
     }
 
     fun send(
@@ -344,15 +338,9 @@ class MoneroKit(
             }
         }
 
-        if (wallet.isSynchronized) {
-            if (!synced) { // first sync
-                while (savingState.getAndSet(true)) {
-                    Thread.sleep(1000)
-                }
-                walletService.storeWallet()
-                savingState.set(false)
-                synced = true
-            }
+        if (wallet.isSynchronized && !synced) {
+            synced = true
+            walletService.requestSave()
         }
 
         if (!wallet.isSynchronized) {

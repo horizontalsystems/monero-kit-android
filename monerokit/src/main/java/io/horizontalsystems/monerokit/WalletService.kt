@@ -11,6 +11,7 @@ import io.horizontalsystems.monerokit.model.WalletListener
 import io.horizontalsystems.monerokit.model.WalletManager
 import io.horizontalsystems.monerokit.util.Helper
 import io.horizontalsystems.monerokit.util.NetCipherHelper
+import java.util.concurrent.atomic.AtomicBoolean
 
 class WalletService(private val context: Context) {
 
@@ -21,6 +22,7 @@ class WalletService(private val context: Context) {
 
     private var observer: Observer? = null
     private var listener: MyWalletListener? = null
+    private val pendingSave = AtomicBoolean(false)
 
     private var daemonHeight: Long = 0
     private var lastDaemonStatusUpdate: Long = 0
@@ -59,13 +61,15 @@ class WalletService(private val context: Context) {
         return walletStatus
     }
 
-    @Synchronized
-    fun storeWallet() {
-        wallet?.storeWithPausedRefresh()
+    fun requestSave() {
+        pendingSave.set(true)
     }
 
     private fun Wallet.storeWithPausedRefresh(): Boolean {
         pauseRefresh()
+        // pauseRefresh() is async — gives the native thread time to finish its
+        // current iteration before store() serializes shared data structures.
+        Thread.sleep(500)
         val result = store()
         startRefresh()
         return result
@@ -74,7 +78,13 @@ class WalletService(private val context: Context) {
     @Synchronized
     fun stop() {
         setObserver(null)
-        listener?.stop()
+        listener?.stop()  // calls wallet.pauseRefresh()
+        if (pendingSave.getAndSet(false)) {
+            // Last-resort save before close. listener.stop() already called
+            // pauseRefresh(); sleep gives the native thread time to quiesce.
+            Thread.sleep(500)
+            wallet?.store()
+        }
         wallet?.close()
         wallet = null
         listener = null
@@ -193,6 +203,12 @@ class WalletService(private val context: Context) {
                 observer?.let {
                     updated = !it.onRefreshed(wallet, walletFullStatus, true)
                 }
+            }
+
+            // Drain any pending save request. Called from the C++ callback thread,
+            // so store() is safe here — the refresh thread is blocked in this callback.
+            if (pendingSave.getAndSet(false)) {
+                wallet.store()
             }
         }
     }
