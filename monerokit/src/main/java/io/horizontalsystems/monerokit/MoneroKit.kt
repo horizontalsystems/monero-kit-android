@@ -3,6 +3,8 @@ package io.horizontalsystems.monerokit
 import android.content.Context
 import android.util.Log
 import io.horizontalsystems.monerokit.KitManager.KitState
+import io.horizontalsystems.monerokit.storage.MoneroDatabase
+import io.horizontalsystems.monerokit.storage.MoneroStorage
 import io.horizontalsystems.monerokit.MoneroKit.Companion.MONERO_LEGACY_MNEMONIC_COUNT
 import io.horizontalsystems.monerokit.data.NodeInfo
 import io.horizontalsystems.monerokit.data.Subaddress
@@ -45,6 +47,7 @@ class MoneroKit(
     private val restoreHeight: Long,
     private val walletId: String,
     private val walletService: WalletService,
+    private val storage: MoneroStorage,
     private val node: String,
     private val trustNode: Boolean
 ) : WalletService.Observer {
@@ -100,6 +103,11 @@ class MoneroKit(
         if (started) return
         started = true
 
+        // Emit cached state immediately so UI isn't blank while syncing
+        storage.getBalance()?.let { _balanceFlow.value = it }
+        val cached = storage.getTransactions()
+        if (cached.isNotEmpty()) _allTransactionsFlow.value = cached
+
         _syncStateFlow.update { SyncState.Connecting(true) }
 
         var kitState = KitManager.checkAndGetInitialState(kitId)
@@ -136,8 +144,8 @@ class MoneroKit(
 
             if (wallet.restoreHeight != restoreHeight) {
                 walletService.stop()
-
-                val deleteWalletResult = deleteWallet(context, walletId)
+                storage.clearAll()
+                deleteWalletFiles(context, walletId)
 
                 createWalletIfNotExists()
 
@@ -388,24 +396,27 @@ class MoneroKit(
 
         _lastBlockUpdatedFlow.tryEmit(Unit)
 
-        _balanceFlow.update {
-            walletService.wallet.let { wallet ->
-                Balance(wallet?.balance ?: 0L, wallet?.unlockedBalance ?: 0L)
-            }
+        val newBalance = walletService.wallet.let { wallet ->
+            Balance(wallet?.balance ?: 0L, wallet?.unlockedBalance ?: 0L)
+        }
+        _balanceFlow.update { newBalance }
+        storage.updateBalance(newBalance)
+
+        if (historyAll != null) {
+            storage.updateTransactions(historyAll.mapNotNull { it })
         }
 
         return true
     }
 
     override fun onInitialWalletState(balance: Balance, txs: List<TransactionInfo?>?) {
-        _balanceFlow.update {
-            balance
-        }
+        _balanceFlow.update { balance }
+        storage.updateBalance(balance)
 
         txs?.let {
-            _allTransactionsFlow.update {
-                txs.mapNotNull { it }
-            }
+            val list = it.mapNotNull { tx -> tx }
+            _allTransactionsFlow.update { list }
+            storage.updateTransactions(list)
         }
     }
 
@@ -468,10 +479,12 @@ class MoneroKit(
         ): MoneroKit {
             val walletService = WalletService(context)
             val restoreHeight = getHeight(restoreDateOrHeight)
+            val db = MoneroDatabase.build(context, "Monero-$walletId")
+            val storage = MoneroStorage(db)
 
             NetCipherHelper.createInstance(context)
 
-            return MoneroKit(context, seed, restoreHeight, walletId, walletService, node, trustNode)
+            return MoneroKit(context, seed, restoreHeight, walletId, walletService, storage, node, trustNode)
         }
 
         fun validateAddress(address: String) {
@@ -569,8 +582,12 @@ class MoneroKit(
         }
 
         fun deleteWallet(context: Context, walletId: String): Boolean {
-            val walletFile: File = Helper.getWalletFile(context, walletId)
+            context.deleteDatabase("Monero-$walletId")
+            return deleteWalletFiles(context, walletId)
+        }
 
+        private fun deleteWalletFiles(context: Context, walletId: String): Boolean {
+            val walletFile: File = Helper.getWalletFile(context, walletId)
             return deleteWallet(walletFile)
         }
 
