@@ -61,13 +61,13 @@ class MoneroKit(
     private val _syncStateFlow = MutableStateFlow<SyncState>(SyncState.NotSynced(SyncError.NotStarted))
     val syncStateFlow = _syncStateFlow.asStateFlow()
 
-    private val _balanceFlow = MutableStateFlow(Balance(0, 0))
+    private val _balanceFlow = MutableStateFlow(storage.getBalance() ?: Balance(0, 0))
     val balanceFlow = _balanceFlow.asStateFlow()
 
     private val _lastBlockUpdatedFlow = MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val lastBlockUpdatedFlow = _lastBlockUpdatedFlow.asSharedFlow()
 
-    private val _allTransactionsFlow = MutableStateFlow<List<TransactionInfo>>(emptyList())
+    private val _allTransactionsFlow = MutableStateFlow<List<TransactionInfo>>(storage.getTransactions())
     val allTransactionsFlow: StateFlow<List<TransactionInfo>> = _allTransactionsFlow
 
     private var nodeInfo: NodeInfo? = null
@@ -100,11 +100,6 @@ class MoneroKit(
     private suspend fun _start() {
         if (started) return
         started = true
-
-        // Emit cached state immediately so UI isn't blank while syncing
-        storage.getBalance()?.let { _balanceFlow.value = it }
-        val cached = storage.getTransactions()
-        if (cached.isNotEmpty()) _allTransactionsFlow.value = cached
 
         _syncStateFlow.update { SyncState.Connecting(true) }
 
