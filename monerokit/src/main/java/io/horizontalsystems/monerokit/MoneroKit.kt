@@ -191,11 +191,11 @@ class MoneroKit(
         amount: Long,
         address: String,
         memo: String?
-    ) {
+    ): String {
         val txData = buildTxData(amount, address, memo)
 
         walletService.createTransaction(txData)
-        walletService.sendTransaction(memo)
+        return walletService.sendTransaction(memo)
     }
 
     fun estimateFee(

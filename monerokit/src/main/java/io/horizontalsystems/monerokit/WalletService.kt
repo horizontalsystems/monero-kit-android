@@ -226,7 +226,7 @@ class WalletService(private val context: Context) {
         }
     }
 
-    fun sendTransaction(notes: String?) {
+    fun sendTransaction(notes: String?): String {
         val wallet = wallet ?: throw IllegalStateException("Send Transaction failed: Wallet is NULL")
 
         val pendingTransaction = wallet.pendingTransaction
@@ -245,6 +245,7 @@ class WalletService(private val context: Context) {
             }
             wallet.storeWithPausedRefresh()
             listener?.updated = true
+            return txId
         } else {
             val error = pendingTransaction.getErrorString()
             wallet.disposePendingTransaction()
