@@ -1,6 +1,8 @@
 /**
  * Copyright (c) 2017-2024 m2049r
  * <p>
+ * Modifications Copyright (c) 2025 Horizontal Systems <hello@horizontalsystems.io>
+ * <p>
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
