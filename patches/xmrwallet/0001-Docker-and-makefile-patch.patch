@@ -1,0 +1,114 @@
+From ef7987e3aac3e781b9d79b0adde86c9c3b4de484 Mon Sep 17 00:00:00 2001
+From: chyngyz <chyngyz.omurov@gmail.com>
+Date: Sat, 13 Sep 2025 16:22:48 +0600
+Subject: [PATCH] Docker and makefile patch
+
+---
+ external-libs/Makefile                 |  3 ++-
+ external-libs/android32.Dockerfile     |  6 +++---
+ external-libs/android64.Dockerfile     | 12 +++++++-----
+ external-libs/android64_x86.Dockerfile |  7 ++++---
+ 4 files changed, 16 insertions(+), 12 deletions(-)
+
+diff --git a/external-libs/Makefile b/external-libs/Makefile
+index 2a5c6d3..96e2b06 100644
+--- a/external-libs/Makefile
++++ b/external-libs/Makefile
+@@ -1,8 +1,9 @@
+ FLAVOUR = monero
+-NPROC=16
++NPROC=2
+ 
+ all: arm64-v8a armeabi-v7a x86_64 include/wallet2_api.h VERSION
+ debug: arm64-v8a armeabi-v7a include/wallet2_api.h VERSION
++mobile: arm64-v8a include/wallet2_api.h VERSION
+ 
+ arm64-v8a: $(FLAVOUR) android64.Dockerfile
+ 	-rm -rf arm64-v8a
+diff --git a/external-libs/android32.Dockerfile b/external-libs/android32.Dockerfile
+index e414648..8fae6af 100644
+--- a/external-libs/android32.Dockerfile
++++ b/external-libs/android32.Dockerfile
+@@ -1,6 +1,6 @@
+-FROM debian:stable
++FROM debian:bullseye
+ 
+-RUN set -x && apt-get update && apt-get install -y unzip automake build-essential curl file pkg-config git python3 python-is-python3 libtool libtinfo5 yacc
++RUN set -x && apt-get update && apt-get install -y unzip automake build-essential curl file pkg-config git python3 python-is-python3 libtool libtinfo5 bison
+ 
+ WORKDIR /opt/android
+ ## INSTALL ANDROID SDK
+@@ -50,7 +50,7 @@ ARG BOOST_VERSION=1_70_0
+ ARG BOOST_VERSION_DOT=1.70.0
+ ARG BOOST_HASH=430ae8354789de4fd19ee52f3b1f739e1fba576f0aded0897c3c2bc00fb38778
+ RUN set -x \
+-    && curl -L -o  boost_${BOOST_VERSION}.tar.bz2 https://boostorg.jfrog.io/artifactory/main/release/${BOOST_VERSION_DOT}/source/boost_${BOOST_VERSION}.tar.bz2 \
++    && curl -L -o  boost_${BOOST_VERSION}.tar.bz2 https://sourceforge.net/projects/boost/files/boost/${BOOST_VERSION_DOT}/boost_${BOOST_VERSION}.tar.bz2/download \
+     && echo "${BOOST_HASH}  boost_${BOOST_VERSION}.tar.bz2" | sha256sum -c \
+     && tar -xvf boost_${BOOST_VERSION}.tar.bz2 \
+     && rm -f boost_${BOOST_VERSION}.tar.bz2 \
+diff --git a/external-libs/android64.Dockerfile b/external-libs/android64.Dockerfile
+index 4c51378..1f72f24 100644
+--- a/external-libs/android64.Dockerfile
++++ b/external-libs/android64.Dockerfile
+@@ -1,6 +1,6 @@
+-FROM debian:stable
++FROM debian:bullseye
+ 
+-RUN set -x && apt-get update && apt-get install -y unzip automake build-essential curl file pkg-config git python3 python-is-python3 libtool libtinfo5 yacc
++RUN set -x && apt-get update && apt-get install -y unzip automake build-essential curl file pkg-config git python3 python-is-python3 libtool libtinfo5 bison
+ 
+ WORKDIR /opt/android
+ ## INSTALL ANDROID SDK
+@@ -50,7 +50,7 @@ ARG BOOST_VERSION=1_70_0
+ ARG BOOST_VERSION_DOT=1.70.0
+ ARG BOOST_HASH=430ae8354789de4fd19ee52f3b1f739e1fba576f0aded0897c3c2bc00fb38778
+ RUN set -x \
+-    && curl -L -o  boost_${BOOST_VERSION}.tar.bz2 https://boostorg.jfrog.io/artifactory/main/release/${BOOST_VERSION_DOT}/source/boost_${BOOST_VERSION}.tar.bz2 \
++    && curl -L -o  boost_${BOOST_VERSION}.tar.bz2 https://sourceforge.net/projects/boost/files/boost/${BOOST_VERSION_DOT}/boost_${BOOST_VERSION}.tar.bz2/download \
+     && echo "${BOOST_HASH}  boost_${BOOST_VERSION}.tar.bz2" | sha256sum -c \
+     && tar -xvf boost_${BOOST_VERSION}.tar.bz2 \
+     && rm -f boost_${BOOST_VERSION}.tar.bz2 \
+@@ -66,12 +66,14 @@ ARG NPROC=4
+ ENV ICONV_VERSION=1.16
+ ENV ICONV_HASH=e6a1b1b589654277ee790cce3734f07876ac4ccfaecbee8afa0b649cf529cc04
+ RUN set -x \
+-    && curl -O http://ftp.gnu.org/pub/gnu/libiconv/libiconv-${ICONV_VERSION}.tar.gz \
++    && curl -O https://ftp.gnu.org/gnu/libiconv/libiconv-${ICONV_VERSION}.tar.gz \
+     && echo "${ICONV_HASH}  libiconv-${ICONV_VERSION}.tar.gz" | sha256sum -c \
+     && tar -xzf libiconv-${ICONV_VERSION}.tar.gz \
+     && rm -f libiconv-${ICONV_VERSION}.tar.gz \
+     && cd libiconv-${ICONV_VERSION} \
+-    && CC=clang CXX=clang++ ./configure --build=x86_64-linux-gnu --host=aarch64-linux-android --prefix=${PREFIX} --disable-rpath \
++    && CC=${TOOLCHAIN_DIR}/bin/aarch64-linux-android-clang \
++       CXX=${TOOLCHAIN_DIR}/bin/aarch64-linux-android-clang++ \
++       ./configure --build=x86_64-linux-gnu --host=aarch64-linux-android --prefix=${PREFIX} --disable-rpath \
+     && make -j${NPROC} && make install
+ 
+ ## Build BOOST
+diff --git a/external-libs/android64_x86.Dockerfile b/external-libs/android64_x86.Dockerfile
+index 57ec354..f33bc73 100644
+--- a/external-libs/android64_x86.Dockerfile
++++ b/external-libs/android64_x86.Dockerfile
+@@ -1,6 +1,6 @@
+-FROM debian:stable
++FROM debian:bullseye
+ 
+-RUN set -x && apt-get update && apt-get install -y unzip automake build-essential curl file pkg-config git python3 python-is-python3 libtool libtinfo5 yacc
++RUN set -x && apt-get update && apt-get install -y unzip automake build-essential curl file pkg-config git python3 python-is-python3 libtool libtinfo5 bison
+ 
+ WORKDIR /opt/android
+ ## INSTALL ANDROID SDK
+@@ -50,7 +50,8 @@ ARG BOOST_VERSION=1_70_0
+ ARG BOOST_VERSION_DOT=1.70.0
+ ARG BOOST_HASH=430ae8354789de4fd19ee52f3b1f739e1fba576f0aded0897c3c2bc00fb38778
+ RUN set -x \
+-    && curl -L -o  boost_${BOOST_VERSION}.tar.bz2 https://boostorg.jfrog.io/artifactory/main/release/${BOOST_VERSION_DOT}/source/boost_${BOOST_VERSION}.tar.bz2 \
++    && curl -L --retry 5 --retry-delay 10 -o boost_${BOOST_VERSION}.tar.bz2 \
++     https://sourceforge.net/projects/boost/files/boost/${BOOST_VERSION_DOT}/boost_${BOOST_VERSION}.tar.bz2/download \
+     && echo "${BOOST_HASH}  boost_${BOOST_VERSION}.tar.bz2" | sha256sum -c \
+     && tar -xvf boost_${BOOST_VERSION}.tar.bz2 \
+     && rm -f boost_${BOOST_VERSION}.tar.bz2 \
+-- 
+2.50.1 (Apple Git-155)
+

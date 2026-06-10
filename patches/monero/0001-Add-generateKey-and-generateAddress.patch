@@ -1,0 +1,196 @@
+From 6c3de7d984d8e869bbccf08a30b2fe5fe9b6461a Mon Sep 17 00:00:00 2001
+From: chyngyz <chyngyz.omurov@gmail.com>
+Date: Wed, 17 Sep 2025 14:49:53 +0600
+Subject: [PATCH] Add generateKey and generateAddress
+
+---
+ src/wallet/api/wallet.cpp    | 158 +++++++++++++++++++++++++++++++++++
+ src/wallet/api/wallet2_api.h |   3 +-
+ 2 files changed, 160 insertions(+), 1 deletion(-)
+
+diff --git a/src/wallet/api/wallet.cpp b/src/wallet/api/wallet.cpp
+index a98125499..a9a873ff7 100644
+--- a/src/wallet/api/wallet.cpp
++++ b/src/wallet/api/wallet.cpp
+@@ -416,6 +416,164 @@ void Wallet::error(const std::string &category, const std::string &str) {
+     MCERROR(category.empty() ? MONERO_DEFAULT_LOG_CATEGORY : category.c_str(), str);
+ }
+ 
++string Wallet::generateKey(const std::string &seed, const std::string &seed_offset, const bool private_key, const bool spend_key) {
++    if (seed.empty()) {
++        LOG_ERROR("Empty seed provided");
++        return "";
++    }
++
++    crypto::secret_key recovery_key;
++    std::string old_language;
++    if (!crypto::ElectrumWords::words_to_bytes(seed, recovery_key, old_language)) {
++        LOG_ERROR("Failed to convert mnemonic seed to bytes");
++        return "";
++    }
++
++    if (!seed_offset.empty()) {
++        crypto::secret_key temp_key = cryptonote::decrypt_key(recovery_key, seed_offset);
++        recovery_key = temp_key;
++        std::fill(reinterpret_cast<volatile char *>(&temp_key), reinterpret_cast<volatile char *>(&temp_key) + sizeof(crypto::secret_key), 0);
++    }
++
++    std::string result;
++    try {
++        crypto::secret_key m_spend_secret_key;
++        crypto::secret_key m_view_secret_key;
++        crypto::public_key m_spend_public_key;
++        crypto::public_key m_view_public_key;
++
++        generate_keys(m_spend_public_key, m_spend_secret_key, recovery_key, true);
++
++        if (spend_key) {
++            if (private_key) {
++                result = epee::string_tools::pod_to_hex(unwrap(unwrap(m_spend_secret_key)));
++            } else {
++                result = epee::string_tools::pod_to_hex(m_spend_public_key);
++            }
++        } else {
++            crypto::secret_key second;
++            keccak((uint8_t *) &m_spend_secret_key, sizeof(crypto::secret_key), (uint8_t *) &second, sizeof(crypto::secret_key));
++            generate_keys(m_view_public_key, m_view_secret_key, second, true);
++            if (private_key) {
++                result = epee::string_tools::pod_to_hex(unwrap(unwrap(m_view_secret_key)));
++            } else {
++                result = epee::string_tools::pod_to_hex(m_view_public_key);
++            }
++            std::fill(reinterpret_cast<volatile char *>(&second), reinterpret_cast<volatile char *>(&second) + sizeof(crypto::secret_key), 0);
++            std::fill(reinterpret_cast<volatile char *>(&m_view_secret_key),
++                      reinterpret_cast<volatile char *>(&m_view_secret_key) + sizeof(crypto::secret_key), 0);
++            std::fill(reinterpret_cast<volatile char *>(&m_view_public_key),
++                      reinterpret_cast<volatile char *>(&m_view_public_key) + sizeof(crypto::public_key), 0);
++        }
++
++        // Clear sensitive data
++        std::fill(reinterpret_cast<volatile char *>(&m_spend_secret_key),
++                  reinterpret_cast<volatile char *>(&m_spend_secret_key) + sizeof(crypto::secret_key), 0);
++        std::fill(reinterpret_cast<volatile char *>(&m_spend_public_key),
++                  reinterpret_cast<volatile char *>(&m_spend_public_key) + sizeof(crypto::public_key), 0);
++    } catch (const std::exception &e) {
++        LOG_ERROR("Error in generateKey: " + std::string(e.what()));
++        result = "";
++    }
++
++    // Clear recovery_key
++    std::fill(reinterpret_cast<volatile char *>(&recovery_key), reinterpret_cast<volatile char *>(&recovery_key) + sizeof(crypto::secret_key), 0);
++    return result;
++}
++
++std::string Wallet::generateAddress(const std::string &seed, const std::string &seed_offset, uint32_t account_index, uint32_t address_index, bool testnet) {
++        if (seed.empty()) {
++            LOG_ERROR("Empty seed provided");
++            return "";
++        }
++
++        crypto::secret_key recovery_key;
++        std::string old_language;
++        if (!crypto::ElectrumWords::words_to_bytes(seed, recovery_key, old_language)) {
++            LOG_ERROR("Failed to convert mnemonic seed to bytes");
++            return "";
++        }
++
++        if (!seed_offset.empty()) {
++            crypto::secret_key temp_key = cryptonote::decrypt_key(recovery_key, seed_offset);
++            recovery_key = temp_key;
++            std::fill(reinterpret_cast<volatile char*>(&temp_key), reinterpret_cast<volatile char*>(&temp_key) + sizeof(crypto::secret_key), 0);
++        }
++
++        cryptonote::network_type _nettype = testnet ? cryptonote::network_type::TESTNET : cryptonote::network_type::MAINNET;
++        std::string result;
++
++        try {
++            crypto::secret_key m_spend_secret_key;
++            crypto::secret_key m_view_secret_key;
++            crypto::public_key m_spend_public_key;
++            crypto::public_key m_view_public_key;
++
++            generate_keys(m_spend_public_key, m_spend_secret_key, recovery_key, true);
++
++            crypto::secret_key second;
++            keccak((uint8_t *)&m_spend_secret_key, sizeof(crypto::secret_key), (uint8_t *)&second, sizeof(crypto::secret_key));
++            generate_keys(m_view_public_key, m_view_secret_key, second, true);
++
++            cryptonote::subaddress_index index = {account_index, address_index};
++            cryptonote::account_public_address address;
++
++            if (index.is_zero()) {
++                address.m_view_public_key = m_view_public_key;
++                address.m_spend_public_key = m_spend_public_key;
++                result = cryptonote::get_account_address_as_str(_nettype, false, address);
++            } else {
++                char data[sizeof(config::HASH_KEY_SUBADDRESS) + sizeof(crypto::secret_key) + 2 * sizeof(uint32_t)];
++                memcpy(data, config::HASH_KEY_SUBADDRESS, sizeof(config::HASH_KEY_SUBADDRESS));
++                memcpy(data + sizeof(config::HASH_KEY_SUBADDRESS), &m_view_secret_key, sizeof(crypto::secret_key));
++                uint32_t idx = SWAP32LE(index.major);
++                memcpy(data + sizeof(config::HASH_KEY_SUBADDRESS) + sizeof(crypto::secret_key), &idx, sizeof(uint32_t));
++                idx = SWAP32LE(index.minor);
++                memcpy(data + sizeof(config::HASH_KEY_SUBADDRESS) + sizeof(crypto::secret_key) + sizeof(uint32_t), &idx, sizeof(uint32_t));
++                crypto::secret_key m;
++                crypto::hash_to_scalar(data, sizeof(data), m);
++
++                // M = m*G
++                crypto::public_key M;
++                crypto::secret_key_to_public_key(m, M);
++
++                // D = B + M
++                crypto::public_key D = rct::rct2pk(rct::addKeys(rct::pk2rct(m_spend_public_key), rct::pk2rct(M)));
++
++                // C = a*D
++                crypto::public_key C = rct::rct2pk(rct::scalarmultKey(rct::pk2rct(D), rct::sk2rct(m_view_secret_key)));
++
++                // result: (C, D)
++                address.m_view_public_key  = C;
++                address.m_spend_public_key = D;
++
++                result = cryptonote::get_account_address_as_str(_nettype, true, address);
++
++                // Clear sensitive data
++                std::fill(reinterpret_cast<volatile char*>(&m), reinterpret_cast<volatile char*>(&m) + sizeof(crypto::secret_key), 0);
++                std::fill(reinterpret_cast<volatile char*>(&M), reinterpret_cast<volatile char*>(&M) + sizeof(crypto::public_key), 0);
++                std::fill(reinterpret_cast<volatile char*>(&C), reinterpret_cast<volatile char*>(&C) + sizeof(crypto::public_key), 0);
++                std::fill(reinterpret_cast<volatile char*>(&D), reinterpret_cast<volatile char*>(&D) + sizeof(crypto::public_key), 0);
++                std::fill(reinterpret_cast<volatile char*>(data), reinterpret_cast<volatile char*>(data) + sizeof(data), 0);
++            }
++
++            // Clear sensitive data
++            std::fill(reinterpret_cast<volatile char*>(&m_spend_secret_key), reinterpret_cast<volatile char*>(&m_spend_secret_key) + sizeof(crypto::secret_key), 0);
++            std::fill(reinterpret_cast<volatile char*>(&m_view_secret_key), reinterpret_cast<volatile char*>(&m_view_secret_key) + sizeof(crypto::secret_key), 0);
++            std::fill(reinterpret_cast<volatile char*>(&m_spend_public_key), reinterpret_cast<volatile char*>(&m_spend_public_key) + sizeof(crypto::public_key), 0);
++            std::fill(reinterpret_cast<volatile char*>(&m_view_public_key), reinterpret_cast<volatile char*>(&m_view_public_key) + sizeof(crypto::public_key), 0);
++            std::fill(reinterpret_cast<volatile char*>(&second), reinterpret_cast<volatile char*>(&second) + sizeof(crypto::secret_key), 0);
++        } catch (const std::exception &e) {
++            LOG_ERROR("Error in generateAddress: " + std::string(e.what()));
++            result = "";
++        }
++
++        // Clear recovery_key
++        std::fill(reinterpret_cast<volatile char*>(&recovery_key), reinterpret_cast<volatile char*>(&recovery_key) + sizeof(crypto::secret_key), 0);
++        return result;
++    }
++
++
+ ///////////////////////// WalletImpl implementation ////////////////////////
+ WalletImpl::WalletImpl(NetworkType nettype, uint64_t kdf_rounds)
+     :m_wallet(nullptr)
+diff --git a/src/wallet/api/wallet2_api.h b/src/wallet/api/wallet2_api.h
+index 231ad9a52..86e26de74 100644
+--- a/src/wallet/api/wallet2_api.h
++++ b/src/wallet/api/wallet2_api.h
+@@ -741,7 +741,8 @@ struct Wallet
+     static void info(const std::string &category, const std::string &str);
+     static void warning(const std::string &category, const std::string &str);
+     static void error(const std::string &category, const std::string &str);
+-
++    static std::string generateKey(const std::string &seed, const std::string &seed_offset, const bool privateKey, const bool spendKey);
++    static std::string generateAddress(const std::string &seed, const std::string &seed_offset, uint32_t account_index, uint32_t address_index, bool testnet);
+    /**
+     * @brief StartRefresh - Start/resume refresh thread (refresh every 10 seconds)
+     */
+-- 
+2.50.1 (Apple Git-155)
+
