@@ -8,6 +8,7 @@ import io.horizontalsystems.monerokit.storage.MoneroStorage
 import io.horizontalsystems.monerokit.MoneroKit.Companion.MONERO_LEGACY_MNEMONIC_COUNT
 import io.horizontalsystems.monerokit.data.NodeInfo
 import io.horizontalsystems.monerokit.data.Subaddress
+import io.horizontalsystems.monerokit.util.NodePinger
 import io.horizontalsystems.monerokit.data.TxData
 import io.horizontalsystems.monerokit.data.UserNotes
 import io.horizontalsystems.monerokit.model.NetworkType
@@ -560,6 +561,25 @@ class MoneroKit(
             return height
         }
 
+        suspend fun pingNodes(nodes: List<String>): List<NodePingResult> = withContext(Dispatchers.IO) {
+            val pairs = nodes.mapNotNull { serialized ->
+                try {
+                    NodeInfo.fromString(serialized)?.let { serialized to it }
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            NodePinger.execute(pairs.map { it.second }, null)
+            pairs.map { (serialized, nodeInfo) ->
+                NodePingResult(
+                    serialized = serialized,
+                    responseTime = nodeInfo.responseTime,
+                    height = nodeInfo.height,
+                    isValid = nodeInfo.isValid
+                )
+            }
+        }
+
         fun deleteWallet(context: Context, walletId: String): Boolean {
             context.deleteDatabase("Monero-$walletId")
             return deleteWalletFiles(context, walletId)
@@ -598,6 +618,18 @@ fun ByteArray?.toRawHexString(): String {
 fun ByteArray?.toHexString(): String {
     val rawHex = this?.toRawHexString() ?: return ""
     return "0x$rawHex"
+}
+
+data class NodePingResult(
+    val serialized: String,
+    val responseTime: Double,   // milliseconds; Double.MAX_VALUE means unreachable
+    val height: Long,
+    val isValid: Boolean
+) {
+    companion object {
+        const val PING_GOOD = 333.0    // ms
+        const val PING_MEDIUM = 667.0  // ms
+    }
 }
 
 data class Balance(

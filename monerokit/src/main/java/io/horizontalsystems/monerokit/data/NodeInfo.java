@@ -39,14 +39,15 @@ public class NodeInfo extends Node {
     final static public int MIN_MAJOR_VERSION = 14;
     final static public String RPC_VERSION = "2.0";
 
-    @Getter
     private long height = 0;
     @Getter
     private long timestamp = 0;
     @Getter
     private int majorVersion = 0;
-    @Getter
     private double responseTime = Double.MAX_VALUE;
+
+    public long getHeight() { return height; }
+    public double getResponseTime() { return responseTime; }
     @Getter
     private int responseCode = 0;
     @Getter
