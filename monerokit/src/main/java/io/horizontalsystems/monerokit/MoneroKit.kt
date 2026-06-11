@@ -563,18 +563,20 @@ class MoneroKit(
 
         suspend fun pingNodes(nodes: List<String>): List<NodePingResult> = withContext(Dispatchers.IO) {
             val pairs = nodes.mapNotNull { serialized ->
-                try {
-                    NodeInfo.fromString(serialized)?.let { serialized to it }
-                } catch (_: Exception) {
-                    null
+                val nodeInfo = NodeInfo.fromString(serialized)
+                if (nodeInfo == null) {
+                    Log.w("MoneroKit/ping", "failed to parse: $serialized")
                 }
+                nodeInfo?.let { serialized to it }
             }
-            NodePinger.execute(pairs.map { it.second }, null)
+            NodePinger.execute(pairs.map { it.second }) { nodeInfo ->
+                Log.d("MoneroKit/ping", "done: ${nodeInfo.host} valid=${nodeInfo.isValid} rt=${nodeInfo.getResponseTime().toInt()}ms h=${nodeInfo.getHeight()}")
+            }
             pairs.map { (serialized, nodeInfo) ->
                 NodePingResult(
                     serialized = serialized,
-                    responseTime = nodeInfo.responseTime,
-                    height = nodeInfo.height,
+                    responseTime = nodeInfo.getResponseTime(),
+                    height = nodeInfo.getHeight(),
                     isValid = nodeInfo.isValid
                 )
             }

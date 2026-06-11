@@ -2,6 +2,7 @@ plugins {
     id 'com.android.library'
     id 'org.jetbrains.kotlin.android'
     alias(libs.plugins.kotlin.ksp)
+    id 'maven-publish'
 }
 
 android {
@@ -54,6 +55,19 @@ android {
     }
     kotlinOptions {
         jvmTarget = '11'
+    }
+}
+
+publishing {
+    publications {
+        release(MavenPublication) {
+            groupId = 'io.horizontalsystems'
+            artifactId = 'monerokit'
+            version = 'local'
+            afterEvaluate {
+                from components.release
+            }
+        }
     }
 }
 
