@@ -715,6 +715,19 @@ Java_io_horizontalsystems_monerokit_model_Wallet_store(JNIEnv *env, jobject inst
     return static_cast<jboolean>(success);
 }
 
+JNIEXPORT jboolean JNICALL
+Java_io_horizontalsystems_monerokit_model_Wallet_storeBlocking(JNIEnv *env, jobject instance,
+                                             jstring path) {
+    const char *_path = env->GetStringUTFChars(path, nullptr);
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    bool success = wallet->storeBlocking(std::string(_path));
+    if (!success) {
+        LOGE("storeBlocking() %s", wallet->errorString().c_str());
+    }
+    env->ReleaseStringUTFChars(path, _path);
+    return static_cast<jboolean>(success);
+}
+
 JNIEXPORT jstring JNICALL
 Java_io_horizontalsystems_monerokit_model_Wallet_getFilename(JNIEnv *env, jobject instance) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
@@ -973,6 +986,17 @@ JNIEXPORT void JNICALL
 Java_io_horizontalsystems_monerokit_model_Wallet_pauseRefresh(JNIEnv *env, jobject instance) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
     wallet->pauseRefresh();
+}
+
+// Wallet::stop() sets wallet2::m_run = false, which breaks the in-flight
+// refresh() block-pull loop promptly so it releases m_refreshMutex2. Unlike
+// pauseRefresh() (which only prevents the NEXT iteration), this interrupts the
+// current one — letting storeBlocking()/close() acquire the lock without waiting
+// for a full sync-to-tip. refresh() resets m_run = true on its next start.
+JNIEXPORT void JNICALL
+Java_io_horizontalsystems_monerokit_model_Wallet_stopSync(JNIEnv *env, jobject instance) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    wallet->stop();
 }
 
 JNIEXPORT jboolean JNICALL

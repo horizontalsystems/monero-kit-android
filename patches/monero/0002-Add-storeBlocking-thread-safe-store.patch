@@ -1,0 +1,55 @@
+diff --git a/src/wallet/api/wallet.cpp b/src/wallet/api/wallet.cpp
+index a9a873ff7..d09989f93 100644
+--- a/src/wallet/api/wallet.cpp
++++ b/src/wallet/api/wallet.cpp
+@@ -1097,6 +1097,17 @@ bool WalletImpl::store(const std::string &path)
+     return true;
+ }
+ 
++bool WalletImpl::storeBlocking(const std::string &path)
++{
++    // Hold the same mutex doRefresh() takes around wallet2::refresh(), so the
++    // cache serialization performed by store() can never run concurrently with a
++    // refresh that mutates the wallet (e.g. the m_blockchain hashchain deque).
++    // Callable from any thread EXCEPT the refresh thread's refreshed() callback,
++    // which already holds m_refreshMutex2 (boost::mutex is non-recursive).
++    boost::lock_guard<boost::mutex> guard(m_refreshMutex2);
++    return store(path);
++}
++
+ string WalletImpl::filename() const
+ {
+     return m_wallet->get_wallet_file();
+diff --git a/src/wallet/api/wallet.h b/src/wallet/api/wallet.h
+index 23ae3e1e2..c1aa27ca9 100644
+--- a/src/wallet/api/wallet.h
++++ b/src/wallet/api/wallet.h
+@@ -103,6 +103,7 @@ public:
+     std::string path() const override;
+     void stop() override;
+     bool store(const std::string &path) override;
++    bool storeBlocking(const std::string &path) override;
+     std::string filename() const override;
+     std::string keysFilename() const override;
+     bool init(const std::string &daemon_address, uint64_t upper_transaction_size_limit = 0, const std::string &daemon_username = "", const std::string &daemon_password = "", bool use_ssl = false, bool lightWallet = false, const std::string &proxy_address = "") override;
+diff --git a/src/wallet/api/wallet2_api.h b/src/wallet/api/wallet2_api.h
+index 86e26de74..bbdd9c31e 100644
+--- a/src/wallet/api/wallet2_api.h
++++ b/src/wallet/api/wallet2_api.h
+@@ -565,6 +565,16 @@ struct Wallet
+      * \return
+      */
+     virtual bool store(const std::string &path) = 0;
++    /*!
++     * \brief storeBlocking - like store(), but safe to call from a thread other than
++     *        the background refresh thread. Serializes against the refresh loop so the
++     *        wallet cache is never written while refresh() is mutating wallet data
++     *        (e.g. the m_blockchain hashchain). Do NOT call from inside the refreshed()
++     *        callback (which already runs under the refresh lock) — use store() there.
++     * \param path - see store()
++     * \return
++     */
++    virtual bool storeBlocking(const std::string &path) = 0;
+     /*!
+      * \brief filename - returns wallet filename
+      * \return

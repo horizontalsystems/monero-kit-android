@@ -65,25 +65,15 @@ class WalletService(private val context: Context) {
         pendingSave.set(true)
     }
 
-    private fun Wallet.storeWithPausedRefresh(): Boolean {
-        pauseRefresh()
-        // pauseRefresh() is async — gives the native thread time to finish its
-        // current iteration before store() serializes shared data structures.
-        Thread.sleep(500)
-        val result = store()
-        startRefresh()
-        return result
-    }
-
     @Synchronized
     fun stop() {
         setObserver(null)
-        listener?.stop()  // calls wallet.pauseRefresh() — async
-        // Always wait for the native refresh thread to finish its current
-        // iteration before store() or close() touch wallet data structures.
-        Thread.sleep(500)
+        listener?.stop()    // detaches listener + pauseRefresh() (no new iterations)
+        wallet?.stopSync()  // interrupt the in-flight refresh so it releases the lock fast
         if (pendingSave.getAndSet(false)) {
-            wallet?.store()
+            // storeBlocking() acquires the native refresh lock — now free since the
+            // refresh was interrupted — so the save never races refresh mutation.
+            wallet?.storeBlocking()
         }
         wallet?.close()
         wallet = null
@@ -243,7 +233,7 @@ class WalletService(private val context: Context) {
             if (!notes.isNullOrEmpty()) {
                 wallet.setUserNote(txId, notes)
             }
-            wallet.storeWithPausedRefresh()
+            wallet.storeBlocking()
             listener?.updated = true
             return txId
         } else {

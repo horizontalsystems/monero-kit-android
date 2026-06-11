@@ -566,6 +566,16 @@ struct Wallet
      */
     virtual bool store(const std::string &path) = 0;
     /*!
+     * \brief storeBlocking - like store(), but safe to call from a thread other than
+     *        the background refresh thread. Serializes against the refresh loop so the
+     *        wallet cache is never written while refresh() is mutating wallet data
+     *        (e.g. the m_blockchain hashchain). Do NOT call from inside the refreshed()
+     *        callback (which already runs under the refresh lock) — use store() there.
+     * \param path - see store()
+     * \return
+     */
+    virtual bool storeBlocking(const std::string &path) = 0;
+    /*!
      * \brief filename - returns wallet filename
      * \return
      */

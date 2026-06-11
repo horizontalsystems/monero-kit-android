@@ -227,6 +227,23 @@ public class Wallet {
 
     public native synchronized boolean store(String path);
 
+    /**
+     * Thread-safe store: serializes against the background refresh thread inside the
+     * native layer, so it is safe to call from any thread (e.g. on stop or after a
+     * send) without racing refresh. Use this instead of {@link #store()} from any
+     * thread other than the refresh callback.
+     */
+    public boolean storeBlocking() {
+        return storeBlocking("");
+    }
+
+    // NOT synchronized: mutual exclusion with refresh (and with the refresh
+    // callback's store()) is enforced natively by m_refreshMutex2. Adding the Java
+    // object monitor here would invert lock order against store() — which IS
+    // synchronized and is called from the refresh callback while that callback
+    // holds m_refreshMutex2 — and deadlock.
+    public native boolean storeBlocking(String path);
+
     public boolean close() {
         disposePendingTransaction();
         return WalletManager.getInstance().close(this);
@@ -352,6 +369,14 @@ public class Wallet {
     public static native String getPaymentIdFromAddress(String address, int networkType);
 
     public static native long getMaximumAllowedAmount();
+
+    /**
+     * Interrupts the in-flight refresh() loop (sets native m_run=false) so it
+     * releases the refresh lock promptly. Unlike {@link #pauseRefresh()}, this
+     * aborts the current iteration rather than only preventing the next one.
+     * refresh() re-enables itself on the next {@link #startRefresh()}.
+     */
+    public native void stopSync();
 
     public native void startRefresh();
 
