@@ -775,7 +775,16 @@ Java_io_horizontalsystems_monerokit_model_Wallet_getRestoreHeight(JNIEnv *env, j
 JNIEXPORT jint JNICALL
 Java_io_horizontalsystems_monerokit_model_Wallet_getConnectionStatusJ(JNIEnv *env, jobject instance) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
-    return wallet->connected();
+    // connected() -> wallet2::check_connection() throws wallet_not_initialized if the
+    // native wallet has been deinitialized (e.g. a status query racing close()). An
+    // uncaught C++ exception crossing JNI calls std::terminate -> abort, so treat any
+    // failure as Disconnected.
+    try {
+        return wallet->connected();
+    } catch (const std::exception &e) {
+        LOGE("getConnectionStatusJ: %s", e.what());
+        return Monero::Wallet::ConnectionStatus_Disconnected;
+    }
 }
 
 JNIEXPORT void JNICALL
@@ -849,14 +858,27 @@ Java_io_horizontalsystems_monerokit_model_Wallet_getApproximateBlockChainHeight(
 JNIEXPORT jlong JNICALL
 Java_io_horizontalsystems_monerokit_model_Wallet_getDaemonBlockChainHeight(JNIEnv *env, jobject instance) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
-    return wallet->daemonBlockChainHeight();
+    // Network query: never let a C++ exception cross JNI (would abort the process).
+    // 0 means "unknown height", which callers already handle.
+    try {
+        return wallet->daemonBlockChainHeight();
+    } catch (const std::exception &e) {
+        LOGE("getDaemonBlockChainHeight: %s", e.what());
+        return 0;
+    }
 }
 
 JNIEXPORT jlong JNICALL
 Java_io_horizontalsystems_monerokit_model_Wallet_getDaemonBlockChainTargetHeight(JNIEnv *env,
                                                                        jobject instance) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
-    return wallet->daemonBlockChainTargetHeight();
+    // Network query: never let a C++ exception cross JNI (would abort the process).
+    try {
+        return wallet->daemonBlockChainTargetHeight();
+    } catch (const std::exception &e) {
+        LOGE("getDaemonBlockChainTargetHeight: %s", e.what());
+        return 0;
+    }
 }
 
 JNIEXPORT jboolean JNICALL
