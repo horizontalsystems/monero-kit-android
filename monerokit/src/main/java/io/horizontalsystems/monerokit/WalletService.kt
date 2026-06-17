@@ -68,7 +68,7 @@ class WalletService(private val context: Context) {
     @Synchronized
     fun stop() {
         setObserver(null)
-        listener?.stop()    // detaches listener + pauseRefresh() (no new iterations)
+        listener?.stop()    // pauseRefresh() (no new iterations); listener freed later in close()
         wallet?.stopSync()  // interrupt the in-flight refresh so it releases the lock fast
         if (pendingSave.getAndSet(false)) {
             // storeBlocking() acquires the native refresh lock — now free since the
@@ -141,7 +141,11 @@ class WalletService(private val context: Context) {
         fun stop() {
             val wallet = wallet ?: return
             wallet.pauseRefresh()
-            wallet.setListener(null)
+            // Do NOT setListener(null) here: that deletes the native listener
+            // while the in-flight refresh thread may still be invoking callbacks
+            // on it (use-after-free). Listener teardown is deferred to
+            // wallet.close(), which runs after stopSync() has interrupted the
+            // refresh, so the listener is freed only once nothing can call it.
         }
 
         override fun moneySpent(txId: String, amount: Long) {}

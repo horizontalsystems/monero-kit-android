@@ -624,6 +624,10 @@ Java_io_horizontalsystems_monerokit_model_WalletManager_closeJ(JNIEnv *env, jobj
                                                      jobject walletInstance) {
     JNI_TRY
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, walletInstance);
+    if (wallet == nullptr) {
+        LOGE("closeJ() wallet is null");
+        return static_cast<jboolean>(true); // already closed
+    }
     bool closeSuccess = Monero::WalletManagerFactory::getWalletManager()->closeWallet(wallet,
                                                                                       false);
     if (closeSuccess) {
@@ -633,6 +637,13 @@ Java_io_horizontalsystems_monerokit_model_WalletManager_closeJ(JNIEnv *env, jobj
             walletListener->deleteGlobalJavaRef(env);
             delete walletListener;
         }
+        // Zero the native handle fields so any later JNI call on this Wallet
+        // sees a null handle (and no-ops) instead of dereferencing freed
+        // memory. A dangling-pointer use-after-free is a SIGSEGV that the JNI
+        // exception barrier cannot catch.
+        env->SetLongField(walletInstance, getHandleField(env, walletInstance), 0);
+        env->SetLongField(walletInstance,
+                          getHandleField(env, walletInstance, "listenerHandle"), 0);
     }
     LOGD("wallet closed");
     return static_cast<jboolean>(closeSuccess);
@@ -797,8 +808,12 @@ JNIEXPORT jboolean JNICALL
 Java_io_horizontalsystems_monerokit_model_Wallet_store(JNIEnv *env, jobject instance,
                                              jstring path) {
     JNI_TRY
-    const char *_path = env->GetStringUTFChars(path, nullptr);
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        LOGE("store() wallet is null");
+        return static_cast<jboolean>(false);
+    }
+    const char *_path = env->GetStringUTFChars(path, nullptr);
     bool success = wallet->store(std::string(_path));
     if (!success) {
         LOGE("store() %s", wallet->errorString().c_str());
@@ -812,8 +827,12 @@ JNIEXPORT jboolean JNICALL
 Java_io_horizontalsystems_monerokit_model_Wallet_storeBlocking(JNIEnv *env, jobject instance,
                                              jstring path) {
     JNI_TRY
-    const char *_path = env->GetStringUTFChars(path, nullptr);
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        LOGE("storeBlocking() wallet is null");
+        return static_cast<jboolean>(false);
+    }
+    const char *_path = env->GetStringUTFChars(path, nullptr);
     bool success = wallet->storeBlocking(std::string(_path));
     if (!success) {
         LOGE("storeBlocking() %s", wallet->errorString().c_str());
@@ -1395,6 +1414,10 @@ Java_io_horizontalsystems_monerokit_model_Wallet_setListenerJ(JNIEnv *env, jobje
                                                     jobject javaListener) {
     JNI_TRY
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        LOGE("setListenerJ() wallet is null");
+        return 0;
+    }
     wallet->setListener(nullptr); // clear old listener
     // delete old listener
     MyWalletListener *oldListener = getHandle<MyWalletListener>(env, instance,
