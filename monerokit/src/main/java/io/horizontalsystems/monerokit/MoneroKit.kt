@@ -67,7 +67,7 @@ class MoneroKit(
     private val _lastBlockUpdatedFlow = MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val lastBlockUpdatedFlow = _lastBlockUpdatedFlow.asSharedFlow()
 
-    private val _allTransactionsFlow = MutableStateFlow<List<TransactionInfo>>(storage.getTransactions())
+    private val _allTransactionsFlow = MutableStateFlow(storage.getTransactions())
     val allTransactionsFlow: StateFlow<List<TransactionInfo>> = _allTransactionsFlow
 
     private var nodeInfo: NodeInfo? = null
