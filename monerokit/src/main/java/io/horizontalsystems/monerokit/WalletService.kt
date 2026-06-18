@@ -190,9 +190,20 @@ class WalletService(private val context: Context) {
                 return
             }
 
-            wallet.setSynchronized() // TODO sometimes called even if sync is not complete
+            // refreshed() also fires when refresh() was interrupted before reaching
+            // the chain tip (e.g. stopSync() during the initial scan). Only mark the
+            // wallet synchronized once it has actually scanned up to the daemon
+            // height; otherwise a partially-scanned wallet gets flagged "synced"
+            // (zero balance / no transactions). setSynchronized() drives
+            // Wallet.isSynchronized(), which is the only signal MoneroKit uses to
+            // report Synced. Both getters return 0 on error -> treated as not-at-tip.
+            val walletHeight = wallet.blockChainHeight
+            val daemonHeight = wallet.daemonBlockChainHeight
+            if (daemonHeight > 0 && walletHeight >= daemonHeight) {
+                wallet.setSynchronized()
+            }
             if (updated) {
-                updateDaemonState(wallet, wallet.blockChainHeight)
+                updateDaemonState(wallet, daemonHeight)
                 wallet.refreshHistory()
                 observer?.let {
                     updated = !it.onRefreshed(wallet, walletFullStatus, true)
