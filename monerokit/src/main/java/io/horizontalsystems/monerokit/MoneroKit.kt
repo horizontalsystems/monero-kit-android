@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
@@ -112,16 +113,32 @@ class MoneroKit(
 
         if (kitState != KitState.Running) return
 
-        _syncStateFlow.update { SyncState.Connecting(false) }
-        startInternal()
+        // Global lock (shared across ALL kits) taken only here, AFTER the
+        // KitManager wait loop, so a concurrent stop() can still flip `started`
+        // (polled by the loop above) to break us out of waiting — no deadlock.
+        KitManager.lifecycleMutex.withLock {
+            if (!started) return  // stop() superseded us before we opened anything
+            _syncStateFlow.update { SyncState.Connecting(false) }
+            startInternal()
+        }
     }
 
     private suspend fun _stop() {
         if (!started) return
         started = false
-        delay(1000)
-        stopInternal()
-        KitManager.removeRunning(kitId)
+        // Same lock _start() uses. _stop is otherwise atomic (stopInternal() is
+        // blocking JNI, no suspension), but _start is not — it suspends inside
+        // startInternal() (withContext(IO)). Without the lock, this _stop could run
+        // in that gap and tear down a wallet mid-open. Holding the lock makes any
+        // in-flight startInternal() finish first, then stopInternal() runs on a
+        // fully-opened wallet, so close() never frees the daemon SSL context while
+        // the wallet's native refresh/long-poll threads are live (X509_STORE_free
+        // crash). stopInternal() always runs: every started wallet is stopped, no
+        // skipping.
+        KitManager.lifecycleMutex.withLock {
+            stopInternal()
+            KitManager.removeRunning(kitId)
+        }
     }
 
     private suspend fun startInternal(): Boolean {
