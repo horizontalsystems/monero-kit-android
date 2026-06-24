@@ -39,14 +39,15 @@ public class NodeInfo extends Node {
     final static public int MIN_MAJOR_VERSION = 14;
     final static public String RPC_VERSION = "2.0";
 
-    @Getter
     private long height = 0;
     @Getter
     private long timestamp = 0;
     @Getter
     private int majorVersion = 0;
-    @Getter
     private double responseTime = Double.MAX_VALUE;
+
+    public long getHeight() { return height; }
+    public double getResponseTime() { return responseTime; }
     @Getter
     private int responseCode = 0;
     @Getter
@@ -186,7 +187,7 @@ public class NodeInfo extends Node {
 
     private Request rpcServiceRequest(int port) {
         final HttpUrl url = new HttpUrl.Builder()
-                .scheme("http")
+                .scheme(port == 443 || port == 18443 ? "https" : "http")
                 .host(host)
                 .port(port)
                 .addPathSegment("json_rpc")
@@ -206,34 +207,45 @@ public class NodeInfo extends Node {
         if (hostAddress.isOnion() && !NetCipherHelper.isTor()) {
             tested = true; // sortof
             responseCode = 418; // I'm a teapot - or I need an Onion - who knows
+            android.util.Log.d("NodeInfo/ping", host + ": skipped onion");
             return false; // autofail
         }
         try {
             long ta = System.nanoTime();
             try (Response response = rpcServiceRequest(port).execute()) {
-                Timber.d("%s: %s", response.code(), response.request().url());
                 responseTime = (System.nanoTime() - ta) / 1000000.0;
                 responseCode = response.code();
+                android.util.Log.d("NodeInfo/ping", host + ":" + port + " -> code=" + responseCode + " time=" + (int)responseTime + "ms");
                 if (response.isSuccessful()) {
                     ResponseBody respBody = response.body(); // closed through Response object
-                    if ((respBody != null) && (respBody.contentLength() < 2000)) { // sanity check
-                        final JSONObject json = new JSONObject(respBody.string());
+                    long contentLength = respBody != null ? respBody.contentLength() : -1;
+                    if ((respBody != null) && (contentLength < 2000)) { // sanity check
+                        final String bodyStr = respBody.string();
+                        final JSONObject json = new JSONObject(bodyStr);
                         String rpcVersion = json.getString("jsonrpc");
-                        if (!RPC_VERSION.equals(rpcVersion))
+                        if (!RPC_VERSION.equals(rpcVersion)) {
+                            android.util.Log.w("NodeInfo/ping", host + ": wrong rpc version: " + rpcVersion);
                             return false;
+                        }
                         final JSONObject result = json.getJSONObject("result");
-                        if (!result.has("credits")) // introduced in monero v0.15.0
+                        if (!result.has("credits")) {
+                            android.util.Log.w("NodeInfo/ping", host + ": no 'credits' field");
                             return false;
+                        }
                         final JSONObject header = result.getJSONObject("block_header");
                         height = header.getLong("height");
                         timestamp = header.getLong("timestamp");
                         majorVersion = header.getInt("major_version");
+                        android.util.Log.d("NodeInfo/ping", host + ": OK height=" + height + " version=" + majorVersion);
                         return true; // success
+                    } else {
+                        android.util.Log.w("NodeInfo/ping", host + ": body null or too large: " + contentLength);
                     }
                 }
             }
         } catch (IOException | JSONException ex) {
-            Timber.d("EX: %s", ex.getMessage()); //TODO: do something here (show error?)
+            android.util.Log.e("NodeInfo/ping", host + ": " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+            Timber.d("EX: %s", ex.getMessage());
         } finally {
             tested = true;
         }

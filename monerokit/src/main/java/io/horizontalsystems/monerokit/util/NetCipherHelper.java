@@ -88,6 +88,7 @@ public class NetCipherHelper implements StatusCallback {
                 if (Instance == null) {
                     final Context applicationContext = context.getApplicationContext();
                     Instance = new NetCipherHelper(applicationContext, MyOrbotHelper.get(context).statusTimeout(5000));
+                    Instance.createClearnetClient();
                 }
             }
         }

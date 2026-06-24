@@ -8,6 +8,7 @@ import io.horizontalsystems.monerokit.storage.MoneroStorage
 import io.horizontalsystems.monerokit.MoneroKit.Companion.MONERO_LEGACY_MNEMONIC_COUNT
 import io.horizontalsystems.monerokit.data.NodeInfo
 import io.horizontalsystems.monerokit.data.Subaddress
+import io.horizontalsystems.monerokit.util.NodePinger
 import io.horizontalsystems.monerokit.data.TxData
 import io.horizontalsystems.monerokit.data.UserNotes
 import io.horizontalsystems.monerokit.model.NetworkType
@@ -577,6 +578,30 @@ class MoneroKit(
             return height
         }
 
+        suspend fun pingNodes(context: Context, nodes: List<String>): List<NodePingResult> = withContext(Dispatchers.IO) {
+            // pingNodes can be called without an active wallet (e.g. at app startup),
+            // so make sure the OkHttp client is initialized before any request.
+            NetCipherHelper.createInstance(context)
+            val pairs = nodes.mapNotNull { serialized ->
+                val nodeInfo = NodeInfo.fromString(serialized)
+                if (nodeInfo == null) {
+                    Log.w("MoneroKit/ping", "failed to parse: $serialized")
+                }
+                nodeInfo?.let { serialized to it }
+            }
+            NodePinger.execute(pairs.map { it.second }) { nodeInfo ->
+                Log.d("MoneroKit/ping", "done: ${nodeInfo.host} valid=${nodeInfo.isValid} rt=${nodeInfo.getResponseTime().toInt()}ms h=${nodeInfo.getHeight()}")
+            }
+            pairs.map { (serialized, nodeInfo) ->
+                NodePingResult(
+                    serialized = serialized,
+                    responseTime = nodeInfo.getResponseTime(),
+                    height = nodeInfo.getHeight(),
+                    isValid = nodeInfo.isValid
+                )
+            }
+        }
+
         fun deleteWallet(context: Context, walletId: String): Boolean {
             context.deleteDatabase("Monero-$walletId")
             return deleteWalletFiles(context, walletId)
@@ -615,6 +640,18 @@ fun ByteArray?.toRawHexString(): String {
 fun ByteArray?.toHexString(): String {
     val rawHex = this?.toRawHexString() ?: return ""
     return "0x$rawHex"
+}
+
+data class NodePingResult(
+    val serialized: String,
+    val responseTime: Double,   // milliseconds; Double.MAX_VALUE means unreachable
+    val height: Long,
+    val isValid: Boolean
+) {
+    companion object {
+        const val PING_GOOD = 333.0    // ms
+        const val PING_MEDIUM = 667.0  // ms
+    }
 }
 
 data class Balance(
