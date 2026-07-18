@@ -6,6 +6,7 @@ import io.horizontalsystems.monerokit.KitManager.KitState
 import io.horizontalsystems.monerokit.storage.MoneroDatabase
 import io.horizontalsystems.monerokit.storage.MoneroStorage
 import io.horizontalsystems.monerokit.MoneroKit.Companion.MONERO_LEGACY_MNEMONIC_COUNT
+import io.horizontalsystems.monerokit.data.MoneroOutput
 import io.horizontalsystems.monerokit.data.NodeInfo
 import io.horizontalsystems.monerokit.data.Subaddress
 import io.horizontalsystems.monerokit.util.NodePinger
@@ -177,6 +178,11 @@ class MoneroKit(
                 _syncStateFlow.update { SyncState.NotSynced(SyncError.StartError(status?.toString() ?: "Wallet is NULL")) }
                 return false
             }
+
+            // a previous run may have died between freeze and thaw of a coin-controlled
+            // send; the kit never freezes outputs durably, so thaw whatever is left over
+            runCatching { wallet.thawAllCoins() }
+
             return true
         } catch (ex: Exception) {
             _syncStateFlow.update { SyncState.NotSynced(SyncError.StartError(ex.message ?: ex.javaClass.simpleName)) }
@@ -208,12 +214,31 @@ class MoneroKit(
     fun send(
         amount: Long,
         address: String,
-        memo: String?
+        memo: String?,
+        selectedOutputs: List<String>? = null
     ): String {
-        val txData = buildTxData(amount, address, memo)
+        val txData = buildTxData(amount, address, memo, selectedOutputs)
 
         walletService.createTransaction(txData)
         return walletService.sendTransaction(memo)
+    }
+
+    fun getUnspentOutputs(): List<MoneroOutput> {
+        val wallet = walletService.wallet ?: return emptyList()
+
+        return wallet.getCoinsInfos(true)
+            .filter { it.isKeyImageKnown }
+            .map { coin ->
+                MoneroOutput(
+                    keyImage = coin.keyImage,
+                    amount = coin.amount,
+                    txHash = coin.txHash,
+                    subaddressIndex = coin.addressIndex,
+                    blockHeight = coin.blockheight,
+                    frozen = coin.isFrozen,
+                    unlocked = coin.isUnlocked
+                )
+            }
     }
 
     fun estimateFee(
@@ -273,15 +298,49 @@ class MoneroKit(
     private fun buildTxData(
         amount: Long,
         destination: String,
-        memo: String?
+        memo: String?,
+        selectedOutputs: List<String>? = null
     ) = TxData().apply {
-        this.amount = if (amount == balance.unlocked) Wallet.SWEEP_ALL else amount
+        // with a manual selection, "spend everything" means the selection sum, not the
+        // wallet balance: SWEEP_ALL then sweeps just the selected outputs because all
+        // others get frozen during transaction creation
+        val spendableAmount = if (selectedOutputs != null) {
+            val selectedAmount = selectedOutputsAmount(selectedOutputs)
+            require(amount <= selectedAmount) {
+                "Amount $amount exceeds total of selected outputs $selectedAmount"
+            }
+            selectedAmount
+        } else {
+            balance.unlocked
+        }
+        this.amount = if (amount == spendableAmount) Wallet.SWEEP_ALL else amount
         this.destination = destination
         mixin = MIXIN
         priority = PendingTransaction.Priority.Priority_Medium
         if (!memo.isNullOrEmpty()) {
             userNotes = UserNotes(memo)
         }
+        selectedKeyImages = selectedOutputs?.toTypedArray()
+    }
+
+    private fun selectedOutputsAmount(selectedOutputs: List<String>): Long {
+        require(selectedOutputs.isNotEmpty()) { "No outputs selected" }
+        val wallet = walletService.wallet ?: throw IllegalStateException("Wallet is NULL")
+
+        val coinsByKeyImage = wallet.getCoinsInfos(true)
+            .filter { it.isKeyImageKnown }
+            .associateBy { it.keyImage }
+
+        var total = 0L
+        for (keyImage in selectedOutputs) {
+            val coin = coinsByKeyImage[keyImage]
+                ?: throw IllegalArgumentException("Unknown output: $keyImage")
+            if (!coin.isSpendable || coin.isFrozen) {
+                throw IllegalArgumentException("Output is locked or not spendable: $keyImage")
+            }
+            total += coin.amount
+        }
+        return total
     }
 
     private suspend fun createWalletIfNotExists() = withContext(Dispatchers.IO) {

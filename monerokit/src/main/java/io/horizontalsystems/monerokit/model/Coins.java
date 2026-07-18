@@ -34,4 +34,8 @@ public class Coins {
     }
 
     private native List<CoinsInfo> refresh(int accountIndex, boolean unspentOnly);
+
+    public native boolean setFrozenByKeyImage(String keyImage);
+
+    public native boolean thawByKeyImage(String keyImage);
 }

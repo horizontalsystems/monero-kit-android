@@ -21,9 +21,13 @@ package io.horizontalsystems.monerokit.model;
 
 import java.io.File;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -413,6 +417,32 @@ public class Wallet {
     private native long createTransactionMultDest(String[] destinations, String payment_id, long[] amounts, int mixin_count, int priority, int accountIndex, int[] subaddresses);
 
     public PendingTransaction createTransaction(TxData txData) {
+        final String[] selectedKeyImages = txData.getSelectedKeyImages();
+        if (selectedKeyImages == null) return createTransactionInternal(txData);
+
+        // wallet2 has no per-input selection API, so restrict its input choice to the
+        // selected outputs by freezing every other spendable output for the duration
+        // of transaction creation; outputs frozen before this call stay frozen
+        final Set<String> selected = new HashSet<>(Arrays.asList(selectedKeyImages));
+        final List<String> temporarilyFrozen = new ArrayList<>();
+        try {
+            for (CoinsInfo coin : getCoinsInfos(true)) {
+                if (coin.isSpendable() && !coin.isFrozen() && coin.isKeyImageKnown()
+                        && !selected.contains(coin.getKeyImage())) {
+                    if (getCoins().setFrozenByKeyImage(coin.getKeyImage())) {
+                        temporarilyFrozen.add(coin.getKeyImage());
+                    }
+                }
+            }
+            return createTransactionInternal(txData);
+        } finally {
+            for (String keyImage : temporarilyFrozen) {
+                getCoins().thawByKeyImage(keyImage);
+            }
+        }
+    }
+
+    private PendingTransaction createTransactionInternal(TxData txData) {
         disposePendingTransaction();
         int _priority = txData.priority.getValue();
         final boolean sweepAll = txData.getAmount() == SWEEP_ALL;
@@ -422,6 +452,16 @@ public class Wallet {
         pendingTransaction = new PendingTransaction(txHandle);
         pendingTransaction.setPocketChange(txData.getPocketChangeAmount());
         return pendingTransaction;
+    }
+
+    // the kit freezes outputs only transiently (see createTransaction), so any output
+    // still frozen on wallet open is a leftover from a run that died mid-transaction
+    public void thawAllCoins() {
+        for (CoinsInfo coin : getCoinsInfos(true)) {
+            if (coin.isFrozen() && coin.isKeyImageKnown()) {
+                getCoins().thawByKeyImage(coin.getKeyImage());
+            }
+        }
     }
 
     private native long createTransactionJ(String dst_addr, String payment_id, long amount, int mixin_count, int priority, int accountIndex);

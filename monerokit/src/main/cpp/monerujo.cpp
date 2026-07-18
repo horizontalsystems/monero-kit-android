@@ -1681,8 +1681,11 @@ jobject newTransactionInfo(JNIEnv *env, Monero::TransactionInfo *info) {
 
 jobject newCoinsInfo(JNIEnv *env, Monero::CoinsInfo *info) {
     jstring _hash = env->NewStringUTF(info->hash().c_str());
+    jstring _keyImage = env->NewStringUTF(info->keyImageKnown() ? info->keyImage().c_str() : "");
+    jstring _pubKey = env->NewStringUTF(info->pubKey().c_str());
 
-    jmethodID c = env->GetMethodID(class_CoinsInfo, "<init>", "(IIJJLjava/lang/String;ZZJZ)V");
+    jmethodID c = env->GetMethodID(class_CoinsInfo, "<init>",
+                                   "(IIJJLjava/lang/String;ZZJZLjava/lang/String;ZLjava/lang/String;)V");
     jobject result = env->NewObject(class_CoinsInfo, c,
                                     static_cast<jint> (info->subaddrAccount()),
                                     static_cast<jint> (info->subaddrIndex()),
@@ -1692,8 +1695,13 @@ jobject newCoinsInfo(JNIEnv *env, Monero::CoinsInfo *info) {
                                     info->spent(),
                                     info->frozen(),
                                     static_cast<jlong> (info->unlockTime()),
-                                    info->unlocked());
+                                    info->unlocked(),
+                                    _keyImage,
+                                    info->keyImageKnown(),
+                                    _pubKey);
     env->DeleteLocalRef(_hash);
+    env->DeleteLocalRef(_keyImage);
+    env->DeleteLocalRef(_pubKey);
     return result;
 }
 
@@ -1732,6 +1740,45 @@ Java_io_horizontalsystems_monerokit_model_Coins_refresh(JNIEnv *env, jobject ins
     coins->refresh();
     return coinsInfoArrayList(env, coins->getAll(), (uint32_t) accountIndex, unspentOnly);
     JNI_CATCH_RET(nullptr)
+}
+
+// Coins::setFrozen()/thaw() take an index into the coins vector, which shifts on every
+// refresh - so resolve key image to index and freeze/thaw in one native call
+static jboolean setCoinFrozenByKeyImage(JNIEnv *env, jobject instance, jstring keyImage,
+                                        bool freeze) {
+    Monero::Coins *coins = getHandle<Monero::Coins>(env, instance);
+    const char *_keyImage = env->GetStringUTFChars(keyImage, nullptr);
+    std::string keyImageStr = _keyImage;
+    env->ReleaseStringUTFChars(keyImage, _keyImage);
+    coins->refresh();
+    const std::vector<Monero::CoinsInfo *> all = coins->getAll();
+    for (int i = 0; i < (int) all.size(); i++) {
+        Monero::CoinsInfo *coin = all[i];
+        if (coin->keyImageKnown() && coin->keyImage() == keyImageStr) {
+            if (freeze)
+                coins->setFrozen(i);
+            else
+                coins->thaw(i);
+            return JNI_TRUE;
+        }
+    }
+    return JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_io_horizontalsystems_monerokit_model_Coins_setFrozenByKeyImage(JNIEnv *env, jobject instance,
+                                                                    jstring keyImage) {
+    JNI_TRY
+    return setCoinFrozenByKeyImage(env, instance, keyImage, true);
+    JNI_CATCH_RET(JNI_FALSE)
+}
+
+JNIEXPORT jboolean JNICALL
+Java_io_horizontalsystems_monerokit_model_Coins_thawByKeyImage(JNIEnv *env, jobject instance,
+                                                               jstring keyImage) {
+    JNI_TRY
+    return setCoinFrozenByKeyImage(env, instance, keyImage, false);
+    JNI_CATCH_RET(JNI_FALSE)
 }
 
 jobject
