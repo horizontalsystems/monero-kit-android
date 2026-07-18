@@ -2,6 +2,7 @@ plugins {
     id 'com.android.library'
     id 'org.jetbrains.kotlin.android'
     alias(libs.plugins.kotlin.ksp)
+    id 'maven-publish'
 }
 
 android {
@@ -55,6 +56,9 @@ android {
     kotlinOptions {
         jvmTarget = '11'
     }
+    publishing {
+        singleVariant('release')
+    }
 }
 
 dependencies {
@@ -83,4 +87,18 @@ dependencies {
     implementation libs.androidx.room.runtime
     implementation libs.androidx.room.ktx
     ksp libs.androidx.room.compiler
+}
+// local development publishing: ./gradlew :monerokit:publishToMavenLocal
+// coordinates match the JitPack artifact used by unstoppable-wallet-android
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+                groupId = 'com.github.horizontalsystems'
+                artifactId = 'monero-kit-android'
+                version = 'local'
+            }
+        }
+    }
 }
