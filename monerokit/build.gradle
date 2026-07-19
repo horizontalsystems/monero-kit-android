@@ -97,7 +97,7 @@ afterEvaluate {
                 from components.release
                 groupId = 'com.github.horizontalsystems'
                 artifactId = 'monero-kit-android'
-                version = 'local'
+                version = 'local-4'
             }
         }
     }

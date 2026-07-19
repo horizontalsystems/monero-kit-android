@@ -93,7 +93,7 @@ class WalletService(private val context: Context) {
             } else {
                 try {
                     wallet.refreshHistory()
-                    observer?.onInitialWalletState(Balance(wallet.balance, wallet.unlockedBalance), wallet.history.all)
+                    observer?.onInitialWalletState(Balance(wallet.balanceAll, wallet.unlockedBalanceAll), wallet.history.all)
                 } catch (err: Throwable) {
                     Log.e("WalletService", "error in onInitialWalletState", err)
                 }

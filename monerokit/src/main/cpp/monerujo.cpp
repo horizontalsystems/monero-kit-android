@@ -1705,8 +1705,9 @@ jobject newCoinsInfo(JNIEnv *env, Monero::CoinsInfo *info) {
     return result;
 }
 
+// accountIndex < 0 means all accounts
 jobject coinsInfoArrayList(JNIEnv *env, const std::vector<Monero::CoinsInfo *> &vector,
-                           uint32_t accountIndex, bool unspentOnly) {
+                           int32_t accountIndex, bool unspentOnly) {
 
     jmethodID java_util_ArrayList_ = env->GetMethodID(class_ArrayList, "<init>", "(I)V");
     jmethodID java_util_ArrayList_add = env->GetMethodID(class_ArrayList, "add",
@@ -1715,7 +1716,7 @@ jobject coinsInfoArrayList(JNIEnv *env, const std::vector<Monero::CoinsInfo *> &
     jobject arrayList = env->NewObject(class_ArrayList, java_util_ArrayList_,
                                        static_cast<jint> (vector.size()));
     for (Monero::CoinsInfo *s: vector) {
-        if (s->subaddrAccount() != accountIndex) continue;
+        if (accountIndex >= 0 && (int32_t) s->subaddrAccount() != accountIndex) continue;
         if (s->spent() && unspentOnly) continue;
         jobject info = newCoinsInfo(env, s);
         env->CallBooleanMethod(arrayList, java_util_ArrayList_add, info);
@@ -1738,7 +1739,7 @@ Java_io_horizontalsystems_monerokit_model_Coins_refresh(JNIEnv *env, jobject ins
     JNI_TRY
     Monero::Coins *coins = getHandle<Monero::Coins>(env, instance);
     coins->refresh();
-    return coinsInfoArrayList(env, coins->getAll(), (uint32_t) accountIndex, unspentOnly);
+    return coinsInfoArrayList(env, coins->getAll(), (int32_t) accountIndex, unspentOnly);
     JNI_CATCH_RET(nullptr)
 }
 
@@ -1782,8 +1783,9 @@ Java_io_horizontalsystems_monerokit_model_Coins_thawByKeyImage(JNIEnv *env, jobj
 }
 
 jobject
+// accountIndex < 0 means all accounts
 transactionInfoArrayList(JNIEnv *env, const std::vector<Monero::TransactionInfo *> &vector,
-                         uint32_t accountIndex) {
+                         int32_t accountIndex) {
 
     jmethodID java_util_ArrayList_ = env->GetMethodID(class_ArrayList, "<init>", "(I)V");
     jmethodID java_util_ArrayList_add = env->GetMethodID(class_ArrayList, "add",
@@ -1792,7 +1794,7 @@ transactionInfoArrayList(JNIEnv *env, const std::vector<Monero::TransactionInfo 
     jobject arrayList = env->NewObject(class_ArrayList, java_util_ArrayList_,
                                        static_cast<jint> (vector.size()));
     for (Monero::TransactionInfo *s: vector) {
-        if (s->subaddrAccount() != accountIndex) continue;
+        if (accountIndex >= 0 && (int32_t) s->subaddrAccount() != accountIndex) continue;
         jobject info = newTransactionInfo(env, s);
         env->CallBooleanMethod(arrayList, java_util_ArrayList_add, info);
         env->DeleteLocalRef(info);
@@ -1807,7 +1809,7 @@ Java_io_horizontalsystems_monerokit_model_TransactionHistory_refreshJ(JNIEnv *en
     Monero::TransactionHistory *history = getHandle<Monero::TransactionHistory>(env,
                                                                                 instance);
     history->refresh();
-    return transactionInfoArrayList(env, history->getAll(), (uint32_t) accountIndex);
+    return transactionInfoArrayList(env, history->getAll(), (int32_t) accountIndex);
     JNI_CATCH_RET(nullptr)
 }
 

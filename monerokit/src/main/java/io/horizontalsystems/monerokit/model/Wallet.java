@@ -186,15 +186,19 @@ public class Wallet {
     private native String getAddressJ(int accountIndex, int addressIndex);
 
     public Subaddress getSubaddressObject(int accountIndex, int subAddressIndex) {
-        return new Subaddress(accountIndex, subAddressIndex, getSubaddress(subAddressIndex), getSubaddressLabel(subAddressIndex));
+        return new Subaddress(accountIndex, subAddressIndex, getSubaddress(accountIndex, subAddressIndex), getSubaddressLabel(accountIndex, subAddressIndex));
     }
 
     public Subaddress getSubaddressObject(int subAddressIndex) {
+        return getSubaddressObjectFor(accountIndex, subAddressIndex);
+    }
+
+    public Subaddress getSubaddressObjectFor(int accountIndex, int subAddressIndex) {
         Subaddress subaddress = getSubaddressObject(accountIndex, subAddressIndex);
         long amount = 0;
         long txsCount = 0;
         for (TransactionInfo info : getHistory().getAll()) {
-            if ((info.addressIndex == subAddressIndex) && (info.direction == TransactionInfo.Direction.Direction_In)) {
+            if ((info.accountIndex == accountIndex) && (info.addressIndex == subAddressIndex) && (info.direction == TransactionInfo.Direction.Direction_In)) {
                 amount += info.amount;
                 txsCount++;
             }
@@ -426,7 +430,7 @@ public class Wallet {
         final Set<String> selected = new HashSet<>(Arrays.asList(selectedKeyImages));
         final List<String> temporarilyFrozen = new ArrayList<>();
         try {
-            for (CoinsInfo coin : getCoinsInfos(true)) {
+            for (CoinsInfo coin : getCoinsInfos(txData.getAccountIndex(), true)) {
                 if (coin.isSpendable() && !coin.isFrozen() && coin.isKeyImageKnown()
                         && !selected.contains(coin.getKeyImage())) {
                     if (getCoins().setFrozenByKeyImage(coin.getKeyImage())) {
@@ -447,8 +451,8 @@ public class Wallet {
         int _priority = txData.priority.getValue();
         final boolean sweepAll = txData.getAmount() == SWEEP_ALL;
         Timber.d("TxData: %s", txData);
-        long txHandle = (sweepAll ? createSweepTransaction(txData.getDestination(), "", txData.mixin, _priority, accountIndex) :
-                createTransactionMultDest(txData.getDestinations(), "", txData.getAmounts(), txData.mixin, _priority, accountIndex, txData.getSubaddresses()));
+        long txHandle = (sweepAll ? createSweepTransaction(txData.getDestination(), "", txData.mixin, _priority, txData.getAccountIndex()) :
+                createTransactionMultDest(txData.getDestinations(), "", txData.getAmounts(), txData.mixin, _priority, txData.getAccountIndex(), txData.getSubaddresses()));
         pendingTransaction = new PendingTransaction(txHandle);
         pendingTransaction.setPocketChange(txData.getPocketChangeAmount());
         return pendingTransaction;
@@ -457,7 +461,7 @@ public class Wallet {
     // the kit freezes outputs only transiently (see createTransaction), so any output
     // still frozen on wallet open is a leftover from a run that died mid-transaction
     public void thawAllCoins() {
-        for (CoinsInfo coin : getCoinsInfos(true)) {
+        for (CoinsInfo coin : getCoinsInfos(TransactionHistory.ALL_ACCOUNTS, true)) {
             if (coin.isFrozen() && coin.isKeyImageKnown()) {
                 getCoins().thawByKeyImage(coin.getKeyImage());
             }
@@ -499,7 +503,7 @@ public class Wallet {
 
     public TransactionHistory getHistory() {
         if (history == null) {
-            history = new TransactionHistory(getHistoryJ(), accountIndex);
+            history = new TransactionHistory(getHistoryJ(), TransactionHistory.ALL_ACCOUNTS);
         }
         return history;
     }
@@ -513,6 +517,11 @@ public class Wallet {
 //virtual AddressBook * addressBook() const = 0;
 
     public List<CoinsInfo> getCoinsInfos(boolean unspentOnly) {
+        return getCoins().getAll(accountIndex, unspentOnly);
+    }
+
+    // accountIndex < 0 means all accounts
+    public List<CoinsInfo> getCoinsInfos(int accountIndex, boolean unspentOnly) {
         return getCoins().getAll(accountIndex, unspentOnly);
     }
 

@@ -6,6 +6,7 @@ import io.horizontalsystems.monerokit.KitManager.KitState
 import io.horizontalsystems.monerokit.storage.MoneroDatabase
 import io.horizontalsystems.monerokit.storage.MoneroStorage
 import io.horizontalsystems.monerokit.MoneroKit.Companion.MONERO_LEGACY_MNEMONIC_COUNT
+import io.horizontalsystems.monerokit.data.MoneroAccount
 import io.horizontalsystems.monerokit.data.MoneroOutput
 import io.horizontalsystems.monerokit.data.NodeInfo
 import io.horizontalsystems.monerokit.data.Subaddress
@@ -55,7 +56,6 @@ class MoneroKit(
 ) : WalletService.Observer {
 
     private val kitId = UUID.randomUUID().toString()
-    private val accountIndex = 0
     private val lifecycleDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val lifecycleScope = CoroutineScope(lifecycleDispatcher + SupervisorJob())
     private var started = false
@@ -73,20 +73,10 @@ class MoneroKit(
     private val _allTransactionsFlow = MutableStateFlow(storage.getTransactions())
     val allTransactionsFlow: StateFlow<List<TransactionInfo>> = _allTransactionsFlow
 
-    private var nodeInfo: NodeInfo? = null
+    private val _accountsFlow = MutableStateFlow(storage.getAccounts())
+    val accountsFlow = _accountsFlow.asStateFlow()
 
-    val receiveAddress: String
-        get() {
-            val wallet = walletService.wallet
-            return if (wallet != null) {
-                val lastUnusedSubaddress = getSubaddresses(wallet).drop(1).lastOrNull { it.txsCount == 0L }
-                lastUnusedSubaddress?.address ?: walletService.wallet?.newSubaddress ?: ""
-            } else if (seed is Seed.WatchOnly) {
-                seed.address
-            } else {
-                getAddress(seed, accountIndex, 1)
-            }
-        }
+    private var nodeInfo: NodeInfo? = null
 
     val balance: Balance
         get() = _balanceFlow.value
@@ -182,6 +172,7 @@ class MoneroKit(
             // a previous run may have died between freeze and thaw of a coin-controlled
             // send; the kit never freezes outputs durably, so thaw whatever is left over
             runCatching { wallet.thawAllCoins() }
+                .onFailure { Log.e("MoneroKit", "thawAllCoins failed", it) }
 
             return true
         } catch (ex: Exception) {
@@ -215,18 +206,19 @@ class MoneroKit(
         amount: Long,
         address: String,
         memo: String?,
-        selectedOutputs: List<String>? = null
+        selectedOutputs: List<String>? = null,
+        accountIndex: Int = 0
     ): String {
-        val txData = buildTxData(amount, address, memo, selectedOutputs)
+        val txData = buildTxData(amount, address, memo, selectedOutputs, accountIndex)
 
         walletService.createTransaction(txData)
         return walletService.sendTransaction(memo)
     }
 
-    fun getUnspentOutputs(): List<MoneroOutput> {
+    fun getUnspentOutputs(accountIndex: Int = 0): List<MoneroOutput> {
         val wallet = walletService.wallet ?: return emptyList()
 
-        return wallet.getCoinsInfos(true)
+        return wallet.getCoinsInfos(accountIndex, true)
             .filter { it.isKeyImageKnown }
             .map { coin ->
                 MoneroOutput(
@@ -241,33 +233,92 @@ class MoneroKit(
             }
     }
 
+    fun createAccount(label: String? = null): MoneroAccount {
+        val wallet = walletService.wallet ?: throw IllegalStateException("Wallet is NULL")
+
+        if (label.isNullOrBlank()) {
+            wallet.addAccount()
+        } else {
+            wallet.addAccount(label)
+        }
+        val newIndex = wallet.numAccounts - 1
+        walletService.requestSave()
+        updateAccounts(wallet)
+
+        return _accountsFlow.value.first { it.index == newIndex }
+    }
+
+    fun setAccountLabel(accountIndex: Int, label: String) {
+        val wallet = walletService.wallet ?: throw IllegalStateException("Wallet is NULL")
+
+        wallet.setAccountLabel(accountIndex, label)
+        walletService.requestSave()
+        updateAccounts(wallet)
+    }
+
+    fun receiveAddress(accountIndex: Int): String {
+        val wallet = walletService.wallet
+        if (wallet == null) {
+            // before the wallet opens, only the primary account is known to exist;
+            // offline fallbacks are limited to it
+            if (accountIndex != 0) throw IllegalStateException("Wallet is NULL")
+            return if (seed is Seed.WatchOnly) {
+                seed.address
+            } else {
+                getAddress(seed, 0, 1)
+            }
+        }
+
+        val lastUnusedSubaddress = getSubaddresses(wallet, accountIndex).drop(1).lastOrNull { it.txsCount == 0L }
+        return lastUnusedSubaddress?.address ?: wallet.getNewSubaddress(accountIndex) ?: ""
+    }
+
+    private fun updateAccounts(wallet: Wallet) {
+        val accounts = (0 until wallet.numAccounts).map { index ->
+            MoneroAccount(
+                index = index,
+                label = wallet.getAccountLabel(index),
+                balance = Balance(wallet.getBalance(index), wallet.getUnlockedBalance(index))
+            )
+        }
+        _accountsFlow.update { accounts }
+        storage.updateAccounts(accounts)
+    }
+
     fun estimateFee(
         amount: Long,
         address: String,
-        memo: String?
+        memo: String?,
+        accountIndex: Int = 0
     ): Long {
         val wallet = walletService.wallet ?: throw IllegalStateException("Wallet is NULL")
-        val txData = buildTxData(amount, address, memo)
+        val txData = buildTxData(amount, address, memo, accountIndex = accountIndex)
 
         return wallet.estimateTransactionFee(txData)
     }
 
     fun getSubaddresses(): List<Subaddress> {
+        return getSubaddresses(0)
+    }
+
+    fun getSubaddresses(accountIndex: Int): List<Subaddress> {
         val wallet = walletService.wallet
         if (wallet == null) {
+            // before the wallet opens, only the primary account is known to exist;
+            // offline fallbacks are limited to it
+            if (accountIndex != 0) return emptyList()
             if (seed is Seed.WatchOnly) {
                 return listOf(Subaddress(0, 0, seed.address, ""))
             }
-            return generateSubaddresses(seed, accountIndex, 2)
+            return generateSubaddresses(seed, 0, 2)
         }
-
-        return getSubaddresses(wallet)
+        return getSubaddresses(wallet, accountIndex)
     }
 
-    private fun getSubaddresses(wallet: Wallet): List<Subaddress> {
+    private fun getSubaddresses(wallet: Wallet, accountIndex: Int): List<Subaddress> {
         val list = mutableListOf<Subaddress>()
-        for (i in 0..wallet.numSubaddresses) {
-            wallet.getSubaddressObject(i)?.let {
+        for (i in 0..wallet.getNumSubaddresses(accountIndex)) {
+            wallet.getSubaddressObjectFor(accountIndex, i)?.let {
                 list.add(it)
             }
         }
@@ -299,19 +350,20 @@ class MoneroKit(
         amount: Long,
         destination: String,
         memo: String?,
-        selectedOutputs: List<String>? = null
+        selectedOutputs: List<String>? = null,
+        accountIndex: Int = 0
     ) = TxData().apply {
         // with a manual selection, "spend everything" means the selection sum, not the
-        // wallet balance: SWEEP_ALL then sweeps just the selected outputs because all
+        // account balance: SWEEP_ALL then sweeps just the selected outputs because all
         // others get frozen during transaction creation
         val spendableAmount = if (selectedOutputs != null) {
-            val selectedAmount = selectedOutputsAmount(selectedOutputs)
+            val selectedAmount = selectedOutputsAmount(selectedOutputs, accountIndex)
             require(amount <= selectedAmount) {
                 "Amount $amount exceeds total of selected outputs $selectedAmount"
             }
             selectedAmount
         } else {
-            balance.unlocked
+            walletService.wallet?.getUnlockedBalance(accountIndex) ?: balance.unlocked
         }
         this.amount = if (amount == spendableAmount) Wallet.SWEEP_ALL else amount
         this.destination = destination
@@ -321,13 +373,14 @@ class MoneroKit(
             userNotes = UserNotes(memo)
         }
         selectedKeyImages = selectedOutputs?.toTypedArray()
+        this.accountIndex = accountIndex
     }
 
-    private fun selectedOutputsAmount(selectedOutputs: List<String>): Long {
+    private fun selectedOutputsAmount(selectedOutputs: List<String>, accountIndex: Int): Long {
         require(selectedOutputs.isNotEmpty()) { "No outputs selected" }
         val wallet = walletService.wallet ?: throw IllegalStateException("Wallet is NULL")
 
-        val coinsByKeyImage = wallet.getCoinsInfos(true)
+        val coinsByKeyImage = wallet.getCoinsInfos(accountIndex, true)
             .filter { it.isKeyImageKnown }
             .associateBy { it.keyImage }
 
@@ -452,11 +505,13 @@ class MoneroKit(
 
         _lastBlockUpdatedFlow.tryEmit(Unit)
 
-        val newBalance = walletService.wallet.let { wallet ->
-            Balance(wallet?.balance ?: 0L, wallet?.unlockedBalance ?: 0L)
-        }
+        // balanceFlow carries the wallet-wide total; per-account balances go to accountsFlow
+        val newBalance = Balance(wallet.balanceAll, wallet.unlockedBalanceAll)
         _balanceFlow.update { newBalance }
         storage.updateBalance(newBalance)
+
+        runCatching { updateAccounts(wallet) }
+            .onFailure { Log.e("MoneroKit", "updateAccounts failed", it) }
 
         if (historyAll != null) {
             storage.updateTransactions(historyAll.mapNotNull { it })

@@ -53,6 +53,9 @@ public class TxData implements Parcelable {
     // explicit accessors (no lombok) so Kotlin code in this module can see them
     private String[] selectedKeyImages;
 
+    // wallet2 account (major subaddress index) funding this transaction
+    private int accountIndex = 0;
+
     public UserNotes userNotes;
 
     public String[] getSelectedKeyImages() {
@@ -61,6 +64,14 @@ public class TxData implements Parcelable {
 
     public void setSelectedKeyImages(String[] selectedKeyImages) {
         this.selectedKeyImages = selectedKeyImages;
+    }
+
+    public int getAccountIndex() {
+        return accountIndex;
+    }
+
+    public void setAccountIndex(int accountIndex) {
+        this.accountIndex = accountIndex;
     }
 
     public TxData() {
@@ -165,8 +176,9 @@ public class TxData implements Parcelable {
     // creating the actual transaction
     // String destination, long amount are already set!
     public void createPocketChange(Wallet wallet) {
-        if (selectedKeyImages != null) {
-            // manual output selection is incompatible with PocketChange splitting
+        if (selectedKeyImages != null || accountIndex != 0) {
+            // manual output selection is incompatible with PocketChange splitting,
+            // and the PocketChange slots are subaddresses of account 0 only
             resetPocketChange();
             return;
         }

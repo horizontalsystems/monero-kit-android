@@ -59,7 +59,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         this.syncState = syncState
 
         if (syncState is SyncState.Synced) {
-            address = kit.receiveAddress
+            address = kit.receiveAddress(0)
         }
 
         emitState()
@@ -91,10 +91,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch(Dispatchers.Default) {
-            address = kit.receiveAddress
-            while (kit.receiveAddress.isEmpty()) {
+            address = kit.receiveAddress(0)
+            while (kit.receiveAddress(0).isEmpty()) {
                 delay(100)
-                address = kit.receiveAddress.ifBlank({ "Loading.." })
+                address = kit.receiveAddress(0).ifBlank({ "Loading.." })
                 emitState()
             }
         }
