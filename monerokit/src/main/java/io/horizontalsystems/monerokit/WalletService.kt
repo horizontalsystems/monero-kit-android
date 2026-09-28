@@ -108,7 +108,15 @@ class WalletService(private val context: Context) {
     private fun initWallet(wallet: Wallet, trustNode: Boolean) {
         wallet.init(0)
         wallet.setTrustedDaemon(trustNode)
-        wallet.setProxy(NetCipherHelper.getProxy())
+        wallet.setProxy(NetCipherHelper.getProxy().ifEmpty { systemSocksProxy() })
+    }
+
+    // wallet2 opens its own daemon connections in native code, so the JVM proxy settings an
+    // embedded Tor installs only reach it through setProxy, read once when the wallet opens
+    private fun systemSocksProxy(): String {
+        val host = System.getProperty("socksProxyHost") ?: return ""
+        val port = System.getProperty("socksProxyPort") ?: return ""
+        return "$host:$port"
     }
 
     private fun updateDaemonState(wallet: Wallet, height: Long) {
