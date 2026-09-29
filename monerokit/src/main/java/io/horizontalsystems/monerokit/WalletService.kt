@@ -2,6 +2,7 @@ package io.horizontalsystems.monerokit
 
 import android.content.Context
 import android.util.Log
+import com.google.common.net.HostAndPort
 import io.horizontalsystems.monerokit.data.TxData
 import io.horizontalsystems.monerokit.model.PendingTransaction
 import io.horizontalsystems.monerokit.model.TransactionInfo
@@ -11,6 +12,7 @@ import io.horizontalsystems.monerokit.model.WalletListener
 import io.horizontalsystems.monerokit.model.WalletManager
 import io.horizontalsystems.monerokit.util.Helper
 import io.horizontalsystems.monerokit.util.NetCipherHelper
+import java.net.InetAddress
 import java.util.concurrent.atomic.AtomicBoolean
 
 class WalletService(private val context: Context) {
@@ -116,7 +118,14 @@ class WalletService(private val context: Context) {
     private fun systemSocksProxy(): String {
         val host = System.getProperty("socksProxyHost") ?: return ""
         val port = System.getProperty("socksProxyPort") ?: "1080"
-        return "$host:$port"
+        // wallet2 only takes a numeric proxy address, with IPv6 in brackets. Resolving the proxy's
+        // own name is fine (only node names must stay with the proxy); if that or the port is bad,
+        // the raw value is kept so the wallet fails to connect instead of going out directly
+        return try {
+            HostAndPort.fromParts(InetAddress.getByName(host).hostAddress, port.toInt()).toString()
+        } catch (e: Exception) {
+            "$host:$port"
+        }
     }
 
     private fun updateDaemonState(wallet: Wallet, height: Long) {
