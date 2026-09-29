@@ -293,6 +293,12 @@ public class NetCipherHelper implements StatusCallback {
         return proxy.address().toString().substring(1);
     }
 
+    // Whether the wallet goes out through a SOCKS proxy, either Orbot's or the JVM's; mirrors
+    // the choice WalletService makes when it hands the proxy to wallet init
+    static public boolean hasProxy() {
+        return !getProxy().isEmpty() || (System.getProperty("socksProxyHost") != null);
+    }
+
     @ToString
     static public class Request {
         final HttpUrl url;

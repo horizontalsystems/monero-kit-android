@@ -27,6 +27,7 @@ import java.net.UnknownHostException;
 
 import io.horizontalsystems.monerokit.model.NetworkType;
 import io.horizontalsystems.monerokit.model.WalletManager;
+import io.horizontalsystems.monerokit.util.NetCipherHelper;
 import io.horizontalsystems.monerokit.util.OnionHelper;
 import lombok.Getter;
 import lombok.Setter;
@@ -80,7 +81,7 @@ public class Node {
         static Address of(String host) throws UnknownHostException {
             if (OnionHelper.isOnionHost(host)) {
                 return new Address(null, host, null);
-            } else if (System.getProperty("socksProxyHost") != null) {
+            } else if (NetCipherHelper.hasProxy()) {
                 // Behind a SOCKS proxy (Tor) the proxy resolves the host; a local lookup would
                 // reveal to the DNS resolver which Monero nodes the wallet uses
                 return new Address(null, null, host);
