@@ -109,9 +109,14 @@ class WalletService(private val context: Context) {
 
     private fun initWallet(wallet: Wallet, trustNode: Boolean) {
         // init already talks to the daemon, so the proxy has to be in place before it runs
-        wallet.init(0, NetCipherHelper.getProxy().ifEmpty { systemSocksProxy() })
+        wallet.init(0, currentProxy())
         wallet.setTrustedDaemon(trustNode)
     }
+
+    // Orbot's proxy when it is on, else the JVM SOCKS proxy the in-app Tor installs, else
+    // none. Every place that hands wallet2 a proxy must make this same choice, or a
+    // reconnect goes out directly while the wallet was opened behind Tor.
+    private fun currentProxy(): String = NetCipherHelper.getProxy().ifEmpty { systemSocksProxy() }
 
     // wallet2 opens its own daemon connections in native code, so the JVM proxy settings an
     // embedded Tor installs only reach it through init, read once when the wallet opens
@@ -241,11 +246,56 @@ class WalletService(private val context: Context) {
         wallet.disposePendingTransaction()
         txData.createPocketChange(wallet)
 
-        val pendingTransaction = wallet.createTransaction(txData)
-        val status = pendingTransaction.status
-        if (status !== PendingTransaction.Status.Status_Ok) {
-            throw IllegalStateException("Create Transaction failed: ${pendingTransaction.getErrorString()}")
+        var pendingTransaction = wallet.createTransaction(txData)
+        if (pendingTransaction.status === PendingTransaction.Status.Status_Ok) return
+
+        val error = pendingTransaction.getErrorString()
+        if (!isDaemonError(error)) {
+            throw IllegalStateException("Create Transaction failed: $error")
         }
+
+        // Building a transaction is the first thing after the fee estimate (served from
+        // wallet2's 30 s caches) that talks to the node again, so a daemon connection the
+        // node or the network dropped in the meantime is noticed only here: the first RPC
+        // fails ("internal error: Failed to get earliest fork height") and wallet2 gives up.
+        // epee does not mark the socket closed on a server-side close (recv returns an
+        // empty buffer, m_connected stays true), so check_connection() alone would reuse
+        // the dead socket. setProxy() with the proxy the wallet was opened with is the one
+        // exposed call that ends in http client disconnect(); getConnectionStatus() then
+        // runs check_connection(), which opens a new socket and invalidates the RPC caches.
+        // Behind the in-app Tor this is the common case: Tor sleeps while the app is in the
+        // background and reconnects on return, closing every stream the wallet had. While
+        // Tor is still reconnecting the JVM proxy points at the blocked port, so the retry
+        // fails closed here instead of going out directly; the adapter reopens the wallet
+        // on the new SOCKS port once Tor reports Connected.
+        Log.w("WalletService", "createTransaction: daemon error, reconnecting and retrying: $error")
+        wallet.disposePendingTransaction()
+        wallet.setProxy(currentProxy())
+        if (wallet.connectionStatus != Wallet.ConnectionStatus.ConnectionStatus_Connected) {
+            throw IllegalStateException("Create Transaction failed: node is unreachable ($error)")
+        }
+
+        pendingTransaction = wallet.createTransaction(txData)
+        if (pendingTransaction.status !== PendingTransaction.Status.Status_Ok) {
+            val retryError = pendingTransaction.getErrorString()
+            wallet.disposePendingTransaction()
+            throw IllegalStateException(
+                if (isDaemonError(retryError)) "Create Transaction failed: node is not responding ($retryError)"
+                else "Create Transaction failed: $retryError"
+            )
+        }
+    }
+
+    // wallet2 reports a node that stopped answering as an "internal error: Failed to get
+    // ..." (height, fork height, fee estimate, output distribution), a connection loss or
+    // a busy daemon; everything else (bad address, not enough money, tx too big) is final
+    private fun isDaemonError(error: String?): Boolean {
+        val e = error?.lowercase() ?: return false
+        return e.contains("failed to get")
+            || e.contains("failed to connect")
+            || e.contains("connection to daemon")
+            || e.contains("daemon is busy")
+            || e.contains("rpc error")
     }
 
     fun sendTransaction(notes: String?): String {
