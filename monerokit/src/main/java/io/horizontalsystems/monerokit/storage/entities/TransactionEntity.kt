@@ -3,6 +3,7 @@ package io.horizontalsystems.monerokit.storage.entities
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import io.horizontalsystems.monerokit.model.TransactionInfo
+import io.horizontalsystems.monerokit.model.Transfer
 
 @Entity(tableName = "transactions")
 data class TransactionEntity(
@@ -23,6 +24,8 @@ data class TransactionEntity(
     val txKey: String?,
     val notes: String?,
     val address: String?,
+    // destinations as "amount:address" pairs joined by ';' (monero addresses are base58)
+    val transfers: String?,
 ) {
     fun toTransactionInfo(): TransactionInfo {
         val tx = TransactionInfo(
@@ -40,7 +43,7 @@ data class TransactionEntity(
             confirmations,
             unlockTime,
             subaddressLabel ?: "",
-            null,
+            decodeTransfers(transfers),
         )
         tx.txKey = txKey
         tx.notes = notes
@@ -67,6 +70,16 @@ data class TransactionEntity(
             txKey = tx.txKey,
             notes = tx.notes,
             address = tx.address,
+            transfers = encodeTransfers(tx.transfers),
         )
+
+        private fun encodeTransfers(transfers: List<Transfer>?): String? =
+            transfers?.takeIf { it.isNotEmpty() }?.joinToString(";") { "${it.amount}:${it.address}" }
+
+        private fun decodeTransfers(value: String?): List<Transfer>? =
+            value?.split(";")?.mapNotNull { entry ->
+                val amount = entry.substringBefore(":").toLongOrNull() ?: return@mapNotNull null
+                Transfer(amount, entry.substringAfter(":"))
+            }
     }
 }
