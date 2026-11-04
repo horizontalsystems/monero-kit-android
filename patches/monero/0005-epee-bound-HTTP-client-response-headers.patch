@@ -1,0 +1,129 @@
+From 65854cf133ae8245abb3cb70ec7d9b14f031567f Mon Sep 17 00:00:00 2001
+From: Samy <samy@ap4.sh>
+Date: Sat, 3 Oct 2026 22:18:21 +0200
+Subject: [PATCH 05/10] epee: bound HTTP client response headers
+
+(cherry picked from commit b9ebbddd29dedc6b99bb62418ed1af86b17ef372)
+
+diff --git a/contrib/epee/include/net/http_client.h b/contrib/epee/include/net/http_client.h
+index 0607ebd0c..322a9cf63 100644
+--- a/contrib/epee/include/net/http_client.h
++++ b/contrib/epee/include/net/http_client.h
+@@ -412,9 +412,19 @@ namespace net_utils
+           return false;
+         }
+ 
++				const size_t old_size = m_header_cache.size();
+ 				m_header_cache += recv_buff;
+ 				recv_buff.clear();
+-				std::string::size_type pos = m_header_cache.find("\r\n\r\n");
++				const std::string::size_type pos = m_header_cache.find("\r\n\r\n", old_size > 3 ? old_size - 3 : 0);
++				constexpr size_t max_header_len = 100000;
++				const size_t header_len = pos == std::string::npos ? m_header_cache.size() : pos + 4;
++				if (header_len > max_header_len)
++				{
++					LOG_ERROR("HTTP response header exceeds " << max_header_len << " bytes");
++					m_state = reciev_machine_state_error;
++					disconnect();
++					return false;
++				}
+ 				if(pos != std::string::npos)
+ 				{
+ 					recv_buff.assign(m_header_cache.begin()+pos+4, m_header_cache.end());
+diff --git a/tests/unit_tests/http.cpp b/tests/unit_tests/http.cpp
+index 42e6676b9..b9df66c0c 100644
+--- a/tests/unit_tests/http.cpp
++++ b/tests/unit_tests/http.cpp
+@@ -32,6 +32,7 @@
+ #include "syncobj.h"
+ #include "net/http_protocol_handler.h"
+ 
++#include <algorithm>
+ #include <boost/algorithm/string/predicate.hpp>
+ #include <boost/algorithm/string/join.hpp>
+ #include <boost/fusion/adapted/std_pair.hpp>
+@@ -102,8 +103,9 @@ public:
+   bool send(const void*, size_t) { return true; }
+   bool recv(std::string& buff, std::chrono::milliseconds)
+   {
+-    buff = data;
+-    data.clear();
++    const std::size_t size = std::min<std::size_t>(data.size(), 16384);
++    buff.assign(data, 0, size);
++    data.erase(0, size);
+     return true;
+   }
+   void set_ssl(epee::net_utils::ssl_options_t) { }
+@@ -1055,6 +1057,69 @@ TEST(HTTP, Client_Rejects_Missing_Response_Status)
+   EXPECT_TRUE(client.disconnected);
+ }
+ 
++TEST(HTTP, Client_Rejects_Oversized_Response_Header)
++{
++  test_http_client client;
++  std::string response = "HTTP/1.1 200 OK\r\nX-Test: ";
++  response.append(100000, 'a');
++  response += "\r\nContent-Length: 0\r\n\r\n";
++
++  EXPECT_FALSE(client.test(response, std::chrono::milliseconds(1000)));
++  EXPECT_EQ(0u, client.headers_seen);
++  EXPECT_TRUE(client.disconnected);
++}
++
++TEST(HTTP, Client_Accepts_Fragmented_Response_Header)
++{
++  test_http_client client;
++  std::string response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nX-Test: ";
++  response.append(16384 - response.size() - 2, 'a');
++  response += "\r\n\r\n";
++
++  EXPECT_TRUE(client.test(response, std::chrono::milliseconds(1000)));
++  EXPECT_EQ(1u, client.headers_seen);
++  EXPECT_FALSE(client.disconnected);
++}
++
++TEST(HTTP, Client_Accepts_Max_Response_Header)
++{
++  test_http_client client;
++  std::string response = "HTTP/1.1 200 OK\r\nX-Test: ";
++  const std::string suffix = "\r\nContent-Length: 0\r\n\r\n";
++  response.append(100000 - response.size() - suffix.size(), 'a');
++  response += suffix;
++  ASSERT_EQ(100000u, response.size());
++
++  EXPECT_TRUE(client.test(response, std::chrono::milliseconds(1000)));
++  EXPECT_EQ(1u, client.headers_seen);
++  EXPECT_FALSE(client.disconnected);
++}
++
++TEST(HTTP, Client_Rejects_Completed_Oversized_Response_Header)
++{
++  test_http_client client;
++  std::string response = "HTTP/1.1 200 OK\r\nX-Test: ";
++  const std::string suffix = "\r\nContent-Length: 0\r\n\r\n";
++  response.append(100001 - response.size() - suffix.size(), 'a');
++  response += suffix;
++  ASSERT_EQ(100001u, response.size());
++
++  EXPECT_FALSE(client.test(response, std::chrono::milliseconds(1000)));
++  EXPECT_EQ(0u, client.headers_seen);
++  EXPECT_TRUE(client.disconnected);
++}
++
++TEST(HTTP, Client_Accepts_Large_Response_Body)
++{
++  test_http_client client;
++  const std::string body(100001, 'a');
++  const std::string response = "HTTP/1.1 200 OK\r\nContent-Length: 100001\r\n\r\n" + body;
++
++  EXPECT_TRUE(client.test(response, std::chrono::milliseconds(1000)));
++  EXPECT_EQ(1u, client.headers_seen);
++  EXPECT_FALSE(client.disconnected);
++}
++
+ TEST(HTTP, Add_Field)
+ {
+   std::string str{"leading text"};
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,46 @@
+From 86f8e736ce0cff410a61f121fdfaf2ee9bbae466 Mon Sep 17 00:00:00 2001
+From: jpk68 <jpk68@tutanota.com>
+Date: Sat, 3 Oct 2026 16:54:19 -0400
+Subject: [PATCH 07/10] epee: correct body-read error states and connection:
+ close handling
+
+(cherry picked from commit f80477a62511a01bedbc6ee0cfdb08e4aae10d21)
+
+diff --git a/contrib/epee/include/net/http_client.h b/contrib/epee/include/net/http_client.h
+index ca5b65b45..6dd16c365 100644
+--- a/contrib/epee/include/net/http_client.h
++++ b/contrib/epee/include/net/http_client.h
+@@ -469,7 +469,7 @@ namespace net_utils
+ 				m_len_in_remain -= recv_buff.size();
+ 				if (!m_pcontent_encoding_handler->update_in(recv_buff))
+ 				{
+-					m_state = reciev_machine_state_done;
++					m_state = reciev_machine_state_error;
+ 					return false;
+ 				}
+ 
+@@ -491,8 +491,11 @@ namespace net_utils
+ 					return true;
+ 				}
+         need_more_data = true;
+-				m_pcontent_encoding_handler->update_in(recv_buff);
+-
++				if (!m_pcontent_encoding_handler->update_in(recv_buff))
++				{
++					m_state = reciev_machine_state_error;
++					return false;
++				}
+ 
+ 				return true;
+ 			}
+@@ -839,6 +842,7 @@ namespace net_utils
+ 				}else if(!m_response_info.m_header_info.m_connection.empty() && is_connection_close_field(m_response_info.m_header_info.m_connection))
+ 				{   //By indirect signs we suspect that data transfer will end with a connection break
+ 					m_state = reciev_machine_state_body_connection_close;
++					return true;
+ 				}else if(is_multipart_body(m_response_info.m_header_info, fake_str))
+ 				{
+ 					m_state = reciev_machine_state_error;
+-- 
+2.54.0 (Apple Git-157)
+

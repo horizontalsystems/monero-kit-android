@@ -1,0 +1,236 @@
+From 2119617336f3831a5dde94b4992a5e1a17c8acd0 Mon Sep 17 00:00:00 2001
+From: Samy <samy@ap4.sh>
+Date: Sat, 17 Oct 2026 15:50:54 +0200
+Subject: [PATCH 10/10] epee: bound and reset chunked response cache
+
+(cherry picked from commit c923a7dff40ed0c79d11741941c1cc03aded3f72)
+
+diff --git a/contrib/epee/include/net/http_client.h b/contrib/epee/include/net/http_client.h
+index 5a7e483d9..d688bf95d 100644
+--- a/contrib/epee/include/net/http_client.h
++++ b/contrib/epee/include/net/http_client.h
+@@ -140,8 +140,10 @@ namespace net_utils
+ 			reciev_machine_state m_state;
+ 			chunked_state m_chunked_state;
+ 			std::string m_chunked_cache;
++			size_t m_chunk_separator_count;
+ 			size_t m_chunk_head_scan_pos;
+ 			size_t m_chunk_head_scan_digits;
++			static constexpr size_t max_chunk_metadata_len = 100000;
+ 			bool m_auto_connect;
+ 			critical_section m_lock;
+ 
+@@ -160,6 +162,7 @@ namespace net_utils
+ 				, m_state()
+ 				, m_chunked_state()
+ 				, m_chunked_cache()
++				, m_chunk_separator_count(0)
+ 				, m_chunk_head_scan_pos(0)
+ 				, m_chunk_head_scan_digits(0)
+ 				, m_auto_connect(true)
+@@ -404,6 +407,7 @@ namespace net_utils
+ 					return false;
+ 				}
+ 				m_header_cache.clear();
++				m_chunked_cache.clear();
+ 				if(m_state != reciev_machine_state_error)
+ 				{
+ 					if(m_response_info.m_header_info.m_connection.size() && !string_tools::compare_no_case("close", m_response_info.m_header_info.m_connection))
+@@ -424,6 +428,7 @@ namespace net_utils
+ 			{
+ 				std::string().swap(m_header_cache);
+ 				std::string().swap(m_chunked_cache);
++				m_chunk_separator_count = 0;
+ 				m_response_info.clear();
+ 				m_len_in_summary = 0;
+ 				m_len_in_remain = 0;
+@@ -571,6 +576,8 @@ namespace net_utils
+ 				std::string::iterator it = buff.begin() + m_chunk_head_scan_pos;
+ 				for(; it!= buff.end(); it++, offset++)
+ 				{
++					if(static_cast<size_t>(it - buff.begin()) >= max_chunk_metadata_len)
++						return false;
+ 					if(!is_hex_symbol(*it))
+ 					{
+ 						if(*it == '\r' || *it == ' ' )
+@@ -594,6 +601,8 @@ namespace net_utils
+ 
+ 								for(it++;it != buff.end(); it++)
+ 								{
++									if(static_cast<size_t>(it - buff.begin()) >= max_chunk_metadata_len)
++										return false;
+ 									if('\r' == *it)
+ 										continue;
+ 									else if('\n' == *it)
+@@ -651,17 +660,29 @@ namespace net_utils
+ 					case http_chunked_state_chunk_head:
+ 						if(m_chunked_cache[0] == '\n' || m_chunked_cache[0] == '\r')
+ 						{
+-							//optimize a bit
+-							if(m_chunked_cache[0] == '\r' && m_chunked_cache.size()>1 && m_chunked_cache[1] == '\n')
+-								m_chunked_cache.erase(0, 2);
+-							else
+-								m_chunked_cache.erase(0, 1);
+-							break;
++							const size_t prefix_len = m_chunked_cache.find_first_not_of("\r\n");
++							const size_t separator_len = prefix_len == std::string::npos ? m_chunked_cache.size() : prefix_len;
++							if(separator_len >= max_chunk_metadata_len - m_chunk_separator_count)
++							{
++								LOG_ERROR("http_stream_filter::handle_chunked(*) Chunk separator too long");
++								m_state = reciev_machine_state_error;
++								disconnect();
++								return false;
++							}
++							m_chunk_separator_count += separator_len;
++							m_chunked_cache.erase(0, separator_len);
++							if(m_chunked_cache.empty())
++							{
++								need_more_data = true;
++								return true;
++							}
+ 						}
++						m_chunk_separator_count = 0;
+ 						if(!get_chunk_head(m_chunked_cache, m_len_in_remain, is_matched))
+ 						{
+ 							LOG_ERROR("http_stream_filter::handle_chunked(*) Failed to get length from chunked head (" << m_chunked_cache.size() << " bytes)");
+ 							m_state = reciev_machine_state_error;
++							disconnect();
+ 							return false;
+ 						}
+ 
+@@ -857,6 +878,7 @@ namespace net_utils
+ 					}
+ 					m_state = reciev_machine_state_body_chunked;
+ 					m_chunked_state = http_chunked_state_chunk_head;
++					m_chunk_separator_count = 0;
+ 					m_chunk_head_scan_pos = 0;
+ 					m_chunk_head_scan_digits = 0;
+ 					return true;
+diff --git a/tests/unit_tests/http.cpp b/tests/unit_tests/http.cpp
+index 410dff83e..3759231fc 100644
+--- a/tests/unit_tests/http.cpp
++++ b/tests/unit_tests/http.cpp
+@@ -95,6 +95,9 @@ public:
+ class dummy_client
+ {
+ public:
++  static constexpr size_t recv_size = 16384;
++  static size_t recv_calls;
++
+   bool connect(const std::string&, int, std::chrono::milliseconds, bool = false, const std::string& = "0.0.0.0") { connected = true; return true; }
+   bool connect(const std::string&, const std::string&, std::chrono::milliseconds, bool = false, const std::string& = "0.0.0.0") { connected = true; return true; }
+   bool disconnect() { connected = false; return true; }
+@@ -103,9 +106,9 @@ public:
+   bool send(const void*, size_t) { return true; }
+   bool recv(std::string& buff, std::chrono::milliseconds)
+   {
+-    const std::size_t size = std::min<std::size_t>(data.size(), 16384);
+-    buff.assign(data, 0, size);
+-    data.erase(0, size);
++    ++recv_calls;
++    buff.assign(data, 0, recv_size);
++    data.erase(0, buff.size());
+     return true;
+   }
+   void set_ssl(epee::net_utils::ssl_options_t) { }
+@@ -113,13 +116,15 @@ public:
+   uint64_t get_bytes_sent() const { return 1; }
+   uint64_t get_bytes_received() const { return 1; }
+ 
+-  void set_test_data(const std::string& s) { data = s; }
++  void set_test_data(const std::string& s) { data = s; recv_calls = 0; }
+ 
+ private:
+   bool connected = true;
+   std::string data;
+ };
+ 
++size_t dummy_client::recv_calls = 0;
++
+ class test_http_client final : public http::http_simple_client_template<dummy_client>
+ {
+ public:
+@@ -133,6 +138,7 @@ public:
+   {
+     ++headers_seen;
+     last_headers = headers;
++    body_seen.clear();
+     if (throw_on_header)
+     {
+       // only once, so a later call on the same client proves it recovered
+@@ -142,7 +148,14 @@ public:
+     return true;
+   }
+ 
++  bool handle_target_data(std::string& piece) override
++  {
++    body_seen += piece;
++    return http::http_simple_client_template<dummy_client>::handle_target_data(piece);
++  }
++
+   http::http_response_info last_headers;
++  std::string body_seen;
+   unsigned headers_seen = 0;
+   bool disconnected = false;
+   bool throw_on_header = false;
+@@ -1201,6 +1214,57 @@ TEST(HTTP, Client_Recovers_From_Exception_During_Response_Processing)
+   EXPECT_STREQ("abc", client.last_headers.m_header_info.m_etc_fields.front().second.c_str());
+ }
+ 
++TEST(HTTP, Client_Rejects_Oversized_Chunk_Header)
++{
++  const std::string header = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
++  const std::string oversized(100001, '0');
++
++  test_http_client incomplete;
++  const std::string incomplete_response = header + oversized + std::string(100000, 'a');
++  EXPECT_FALSE(incomplete.test(incomplete_response, std::chrono::milliseconds(1000)));
++  EXPECT_EQ(7u, dummy_client::recv_calls);
++  EXPECT_TRUE(incomplete.test(header + "1\r\na\r\n0\r\n\r\n", std::chrono::milliseconds(1000)));
++
++  test_http_client terminal;
++  const std::string terminal_response = header + "0\r\n" + std::string(100001, '\r') + std::string(100000, 'a');
++  EXPECT_FALSE(terminal.test(terminal_response, std::chrono::milliseconds(1000)));
++  EXPECT_EQ(7u, dummy_client::recv_calls);
++
++  test_http_client separators;
++  const std::string separators_response = header + "1\r\na" + std::string(100001, '\r') + std::string(100000, 'a');
++  EXPECT_FALSE(separators.test(separators_response, std::chrono::milliseconds(1000)));
++  EXPECT_EQ(7u, dummy_client::recv_calls);
++
++  test_http_client valid_separators;
++  EXPECT_TRUE(valid_separators.test(header + "1\r\na" + std::string(99999, '\r') + "1\r\nb\r\n0\r\n\r\n",
++    std::chrono::milliseconds(1000)));
++  EXPECT_EQ("ab", valid_separators.body_seen);
++
++  test_http_client excessive_separators;
++  EXPECT_FALSE(excessive_separators.test(header + "1\r\na" + std::string(100000, '\r') + "1\r\nb\r\n0\r\n\r\n",
++    std::chrono::milliseconds(1000)));
++  EXPECT_TRUE(excessive_separators.disconnected);
++
++  test_http_client valid;
++  EXPECT_TRUE(valid.test(header + "1\r\na\r\n0\r\n\r\n", std::chrono::milliseconds(1000)));
++
++  test_http_client large_body;
++  EXPECT_TRUE(large_body.test(header + "186a1\r\n" + std::string(100001, 'a') + "\r\n0\r\n\r\n",
++    std::chrono::milliseconds(1000)));
++}
++
++TEST(HTTP, Client_Drops_Chunked_Trailing_Bytes)
++{
++  const std::string header = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
++  test_http_client client;
++
++  ASSERT_TRUE(client.test(header + "1\r\na\r\n0\r\n\r\n1\r\nx\r\n0\r\n\r\n", std::chrono::milliseconds(1000)));
++  EXPECT_EQ("a", client.body_seen);
++  client.set_server("daemon-b", "18081", boost::none);
++  ASSERT_TRUE(client.test(header + "1\r\nb\r\n0\r\n\r\n", std::chrono::milliseconds(1000)));
++  EXPECT_EQ("b", client.body_seen);
++}
++
+ TEST(HTTP, Add_Field)
+ {
+   std::string str{"leading text"};
+-- 
+2.54.0 (Apple Git-157)
+

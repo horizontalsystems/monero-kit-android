@@ -1,0 +1,73 @@
+From 664baea01382fd85877a14d5cca5fb6133adbd8b Mon Sep 17 00:00:00 2001
+From: jpk68 <jpk68@tutanota.com>
+Date: Sat, 3 Oct 2026 14:49:00 -0400
+Subject: [PATCH 06/10] epee: avoid quadratic chunk-size parsing and unbounded
+ recv deadlines
+
+(cherry picked from commit d5bb74555635699b505b29235d5a18bf54c15fd5)
+
+diff --git a/contrib/epee/include/net/http_client.h b/contrib/epee/include/net/http_client.h
+index 322a9cf63..ca5b65b45 100644
+--- a/contrib/epee/include/net/http_client.h
++++ b/contrib/epee/include/net/http_client.h
+@@ -140,6 +140,8 @@ namespace net_utils
+ 			reciev_machine_state m_state;
+ 			chunked_state m_chunked_state;
+ 			std::string m_chunked_cache;
++			size_t m_chunk_head_scan_pos;
++			size_t m_chunk_head_scan_digits;
+ 			bool m_auto_connect;
+ 			critical_section m_lock;
+ 
+@@ -158,6 +160,8 @@ namespace net_utils
+ 				, m_state()
+ 				, m_chunked_state()
+ 				, m_chunked_cache()
++				, m_chunk_head_scan_pos(0)
++				, m_chunk_head_scan_digits(0)
+ 				, m_auto_connect(true)
+ 				, m_lock()
+ 			{}
+@@ -517,8 +521,10 @@ namespace net_utils
+ 				bool get_chunk_head(std::string& buff, size_t& chunk_size, bool& is_matched)
+ 			{
+ 				is_matched = false;
+-				size_t offset = 0;
+-				for(std::string::iterator it = buff.begin(); it!= buff.end(); it++, offset++)
++				// resume from where the last call left off instead of rescanning from 0
++				size_t offset = m_chunk_head_scan_digits;
++				std::string::iterator it = buff.begin() + m_chunk_head_scan_pos;
++				for(; it!= buff.end(); it++, offset++)
+ 				{
+ 					if(!is_hex_symbol(*it))
+ 					{
+@@ -530,6 +536,8 @@ namespace net_utils
+ 						else if(*it == '\n')
+ 						{	
+ 							std::string chunk_head = buff.substr(0, offset);
++							m_chunk_head_scan_pos = 0;
++							m_chunk_head_scan_digits = 0;
+ 							if(!get_len_from_chunk_head(chunk_head, chunk_size))
+ 								return false;
+ 
+@@ -566,6 +574,8 @@ namespace net_utils
+ 					}
+ 				}
+ 
++				m_chunk_head_scan_pos = buff.size();
++				m_chunk_head_scan_digits = offset;
+ 				return true;
+ 			}
+ 			//---------------------------------------------------------------------------
+@@ -802,6 +812,8 @@ namespace net_utils
+ 					}
+ 					m_state = reciev_machine_state_body_chunked;
+ 					m_chunked_state = http_chunked_state_chunk_head;
++					m_chunk_head_scan_pos = 0;
++					m_chunk_head_scan_digits = 0;
+ 					return true;
+ 				}
+ 				else if(!m_response_info.m_header_info.m_content_length.empty())
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,28 @@
+From 61e2c8ad564972e9b79d243cf322de25eaf54c7c Mon Sep 17 00:00:00 2001
+From: abdrasulov <abdrasulov@gmail.com>
+Date: Wed, 4 Nov 2026 16:13:46 +0600
+Subject: [PATCH] Unwrap chacha_key before hex-formatting it in device_sidekick
+
+epee::as_byte_span now requires a trivially copyable type, and
+crypto::chacha_key is an mlocked, scrubbed array, so take the span of
+the underlying std::array instead.
+---
+ src/device/device_sidekick.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/device/device_sidekick.cpp b/src/device/device_sidekick.cpp
+index 5670d91d5..9bd4fd572 100644
+--- a/src/device/device_sidekick.cpp
++++ b/src/device/device_sidekick.cpp
+@@ -50,7 +50,7 @@ namespace std {
+         epee::to_hex::formatted(o, epee::as_byte_span(v)); return o;
+     }
+     inline std::ostream &operator<<(std::ostream &o, const crypto::chacha_key &v) {
+-        epee::to_hex::formatted(o, epee::as_byte_span(v)); return o;
++        epee::to_hex::formatted(o, epee::as_byte_span(unwrap(unwrap(v)))); return o;
+     }
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+
