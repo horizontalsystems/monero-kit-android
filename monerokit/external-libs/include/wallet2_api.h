@@ -487,6 +487,25 @@ struct Wallet
         ConnectionStatus_WrongVersion
     };
 
+    enum BackgroundSyncType {
+        BackgroundSync_Off = 0,
+        BackgroundSync_ReusePassword = 1,
+        BackgroundSync_CustomPassword = 2
+    };
+
+    enum MessageSignatureType {
+        MessageSignatureType_Invalid = 0,
+        MessageSignatureType_Spend,
+        MessageSignatureType_View
+    };
+
+    struct MessageSignatureResult {
+        bool valid = false;
+        unsigned version = 0;
+        bool old = false;
+        MessageSignatureType type = MessageSignatureType_Invalid;
+    };
+
     virtual ~Wallet() = 0;
     virtual std::string seed(const std::string& seed_offset = "") const = 0;
     virtual std::string getSeedLanguage() const = 0;
@@ -989,6 +1008,42 @@ struct Wallet
      */
     virtual bool scanTransactions(const std::vector<std::string> &txids) = 0;
 
+    /*!
+     * \brief setupBackgroundSync       - setup background sync mode with just a view key
+     * \param background_sync_type      - the mode the wallet background syncs in
+     * \param wallet_password
+     * \param background_cache_password - custom password to encrypt background cache, only needed for custom password background sync type
+     * \return                          - true on success
+     */
+    virtual bool setupBackgroundSync(const BackgroundSyncType background_sync_type, const std::string &wallet_password, const optional<std::string> &background_cache_password) = 0;
+
+    /*!
+     * \brief getBackgroundSyncType     - get mode the wallet background syncs in
+     * \return                          - the type, or off if type is unknown
+     */
+    virtual BackgroundSyncType getBackgroundSyncType() const = 0;
+
+    /**
+     * @brief startBackgroundSync - sync the chain in the background with just view key
+     */
+    virtual bool startBackgroundSync() = 0;
+
+    /**
+     * @brief stopBackgroundSync  - bring back spend key and process background synced txs
+     * \param wallet_password
+     */
+    virtual bool stopBackgroundSync(const std::string &wallet_password) = 0;
+
+    /**
+     * @brief isBackgroundSyncing - returns true if the wallet is background syncing
+     */
+    virtual bool isBackgroundSyncing() const = 0;
+
+    /**
+     * @brief isBackgroundWallet - returns true if the wallet is a background wallet
+     */
+    virtual bool isBackgroundWallet() const = 0;
+
     virtual TransactionHistory * history() = 0;
     virtual AddressBook * addressBook() = 0;
     virtual Coins * coins() = 0;
@@ -1059,6 +1114,14 @@ struct Wallet
      * \return true if the signature verified, false otherwise
      */
     virtual bool verifySignedMessage(const std::string &message, const std::string &addres, const std::string &signature) const = 0;
+    /*!
+     * \brief verifySignedMessageWithDetails - verify a signature and identify the signing key and algorithm
+     * \param message - the message (arbitrary byte data)
+     * \param address - the address the signature claims to be made with
+     * \param signature - the signature
+     * \return the verification result, including the signature version and key type
+     */
+    virtual MessageSignatureResult verifySignedMessageWithDetails(const std::string &message, const std::string &address, const std::string &signature) const = 0;
 
     /*!
      * \brief signMultisigParticipant   signs given message with the multisig public signer key
