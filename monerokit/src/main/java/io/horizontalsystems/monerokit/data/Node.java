@@ -142,6 +142,11 @@ public class Node {
         return hostAddress.isOnion();
     }
 
+    // Written out: the generated getters are not there yet when the Kotlin sources compile
+    public boolean hasLogin() {
+        return !username.isEmpty();
+    }
+
     static public Node fromString(String nodeString) {
         try {
             return new Node(nodeString);

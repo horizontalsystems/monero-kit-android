@@ -3,6 +3,7 @@ package io.horizontalsystems.monerokit
 import android.content.Context
 import android.util.Log
 import com.google.common.net.HostAndPort
+import io.horizontalsystems.monerokit.data.NodeInfo
 import io.horizontalsystems.monerokit.data.TxData
 import io.horizontalsystems.monerokit.model.PendingTransaction
 import io.horizontalsystems.monerokit.model.TransactionInfo
@@ -13,6 +14,7 @@ import io.horizontalsystems.monerokit.model.WalletManager
 import io.horizontalsystems.monerokit.util.Helper
 import io.horizontalsystems.monerokit.util.NetCipherHelper
 import java.net.InetAddress
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicBoolean
 
 class WalletService(private val context: Context) {
@@ -29,6 +31,36 @@ class WalletService(private val context: Context) {
     private var daemonHeight: Long = 0
     private var lastDaemonStatusUpdate: Long = 0
     private var connectionStatus: Wallet.ConnectionStatus = Wallet.ConnectionStatus.ConnectionStatus_Disconnected
+
+    // Whether the open wallet was given a daemon login. Set when the wallet is initialised.
+    private var daemonLoginGiven = false
+
+    // The id of the transaction that is built and not yet out, kept over repeated broadcasts
+    private var builtTxId: String? = null
+    private var broadcastTried = false
+
+    // The wallet has one status for all its calls, so a transfer that was not built leaves
+    // its error where the sync callback reads it. These two tell that error from the sync's own
+    @Volatile
+    private var buildingTransfer = false
+
+    @Volatile
+    private var transferError: String? = null
+
+    private val sendsInProgress = AtomicInteger()
+
+    /**
+     * Runs a send or a fee estimate. While one runs, a failed sync round is not reported: the
+     * call moves the wallet off a daemon that fails, and the next round tells where it stands.
+     */
+    internal suspend fun <T> duringSend(call: suspend () -> T): T {
+        sendsInProgress.incrementAndGet()
+        try {
+            return call()
+        } finally {
+            sendsInProgress.decrementAndGet()
+        }
+    }
 
     var wallet: Wallet? = null
         private set
@@ -111,6 +143,81 @@ class WalletService(private val context: Context) {
         // init already talks to the daemon, so the proxy has to be in place before it runs
         wallet.init(0, currentProxy())
         wallet.setTrustedDaemon(trustNode)
+        daemonLoginGiven = WalletManager.getInstance().daemonUsername.isNotEmpty()
+    }
+
+    internal enum class DaemonChange {
+        Moved,
+
+        /** No wallet is open; the daemon is used from the next start. */
+        NoWallet,
+
+        /** The open wallet cannot take this daemon; it has to be opened again on it. */
+        NeedsReopen,
+    }
+
+    /**
+     * Moves the open wallet to another daemon. The wallet keeps what it has synced and goes on
+     * from there; nothing is closed. This is the call the wallet was initialised with at start,
+     * made again with the new address, between two refreshes.
+     */
+    @Synchronized
+    internal fun changeDaemon(node: NodeInfo, trustNode: Boolean): DaemonChange {
+        val wallet = wallet ?: return DaemonChange.NoWallet
+
+        // The engine keeps the login it was last given and has no call to drop it, so a daemon
+        // that has none would be offered the previous daemon's
+        val hasLogin = node.hasLogin()
+        if (daemonLoginGiven && !hasLogin) return DaemonChange.NeedsReopen
+
+        wallet.pauseRefresh()
+        try {
+            WalletManager.getInstance().setDaemon(node)
+            if (!wallet.init(0, currentProxy())) return DaemonChange.NeedsReopen
+            wallet.setTrustedDaemon(trustNode)
+        } catch (e: RuntimeException) {
+            Log.e("WalletService", "changeDaemon failed", e)
+            return DaemonChange.NeedsReopen
+        } finally {
+            wallet.startRefresh()
+        }
+
+        daemonLoginGiven = hasLogin
+        // what is known of the previous daemon says nothing about this one
+        lastDaemonStatusUpdate = 0
+        listener?.updated = true
+        return DaemonChange.Moved
+    }
+
+    @Synchronized
+    internal fun setTrustedDaemon(trustNode: Boolean) {
+        wallet?.setTrustedDaemon(trustNode)
+    }
+
+    /**
+     * Drops the wallet's daemon connection and opens a new one. epee does not mark a socket
+     * the other side closed (recv returns an empty buffer, m_connected stays true), so the
+     * wallet would go on using it. setProxy() with the proxy the wallet was opened with is the
+     * one exposed call that ends in http client disconnect(); getConnectionStatus() then runs
+     * check_connection(), which opens a new socket and invalidates the RPC caches.
+     *
+     * While an in-app Tor is still reconnecting the JVM proxy points at the blocked port, so
+     * this fails closed instead of going out directly.
+     *
+     * Not synchronized: the connection check can wait for the daemon, and stop() must not
+     * wait for it.
+     *
+     * @return whether the daemon answers.
+     */
+    internal fun reconnect(): Boolean {
+        val wallet = wallet ?: return false
+        return try {
+            wallet.setProxy(currentProxy())
+            wallet.connectionStatus == Wallet.ConnectionStatus.ConnectionStatus_Connected
+        } catch (e: RuntimeException) {
+            Log.e("WalletService", "reconnect failed", e)
+            false
+        }
     }
 
     // Orbot's proxy when it is on, else the JVM SOCKS proxy the in-app Tor installs, else
@@ -206,11 +313,22 @@ class WalletService(private val context: Context) {
         override fun refreshed() {
             val wallet = wallet ?: return
 
-            val walletFullStatus = wallet.fullStatus
-            if (!walletFullStatus.isOk) {
-                observer?.onRefreshed(wallet, walletFullStatus, false)
-                return
+            val walletStatus = wallet.fullStatus
+            if (!walletStatus.isOk) {
+                val about = statusError(
+                    walletStatus.errorString, buildingTransfer, transferError, sendsInProgress.get() > 0
+                )
+                when (about) {
+                    StatusError.OfTheSync -> {
+                        observer?.onRefreshed(wallet, walletStatus, false)
+                        return
+                    }
+                    StatusError.HeldBack -> return
+                    // The daemon height asked for below clears it once the daemon answers
+                    StatusError.OfATransfer -> Unit
+                }
             }
+            val walletFullStatus = if (walletStatus.isOk) walletStatus else Status()
 
             // refreshed() also fires when refresh() was interrupted before reaching
             // the chain tip (e.g. stopSync() during the initial scan). Only mark the
@@ -240,88 +358,149 @@ class WalletService(private val context: Context) {
         }
     }
 
-    fun createTransaction(txData: TxData) {
-        val wallet = wallet ?: throw IllegalStateException("Create Transaction failed: Wallet is NULL")
-
-        wallet.disposePendingTransaction()
-        txData.createPocketChange(wallet)
-
-        var pendingTransaction = wallet.createTransaction(txData)
-        if (pendingTransaction.status === PendingTransaction.Status.Status_Ok) return
-
-        val error = pendingTransaction.getErrorString()
-        if (!isDaemonError(error)) {
-            throw IllegalStateException("Create Transaction failed: $error")
+    /**
+     * The fee the wallet works out from what the daemon tells it. A daemon failure is answered
+     * with one reconnect and a second try, as in [createTransaction].
+     */
+    internal fun estimateFee(txData: TxData): Long {
+        val wallet = wallet ?: throw IllegalStateException("Wallet is NULL")
+        try {
+            return wallet.estimateTransactionFee(txData)
+        } catch (e: RuntimeException) {
+            if (!isDaemonError(e.message)) throw e
+            Log.w("WalletService", "estimateFee: daemon error, reconnecting and retrying: ${e.message}")
+            if (!reconnect()) throw NodeUnreachableException(e.message, e)
         }
+        try {
+            return wallet.estimateTransactionFee(txData)
+        } catch (e: RuntimeException) {
+            if (isDaemonError(e.message)) throw NodeUnreachableException(e.message, e)
+            throw e
+        }
+    }
+
+    /**
+     * Builds and signs the transaction and keeps it in the wallet. Nothing is sent.
+     *
+     * @throws NodeUnreachableException when the daemon did not answer what building needs.
+     * @throws TransferNotBuiltException for every other reason.
+     */
+    internal fun createTransaction(txData: TxData) {
+        val wallet = wallet
+            ?: throw TransferNotBuiltException(SendResult.Reason.WalletClosed, "Create Transaction failed: Wallet is NULL")
+
+        builtTxId = null
+        broadcastTried = false
+        val error = try {
+            build(wallet, txData) ?: return
+        } catch (e: RuntimeException) {
+            throw TransferNotBuiltException(SendResult.Reason.Failed, "Create Transaction failed: ${e.message}")
+        }
+        if (!isDaemonError(error)) throw notBuilt(error)
 
         // Building a transaction is the first thing after the fee estimate (served from
         // wallet2's 30 s caches) that talks to the node again, so a daemon connection the
         // node or the network dropped in the meantime is noticed only here: the first RPC
         // fails ("internal error: Failed to get earliest fork height") and wallet2 gives up.
-        // epee does not mark the socket closed on a server-side close (recv returns an
-        // empty buffer, m_connected stays true), so check_connection() alone would reuse
-        // the dead socket. setProxy() with the proxy the wallet was opened with is the one
-        // exposed call that ends in http client disconnect(); getConnectionStatus() then
-        // runs check_connection(), which opens a new socket and invalidates the RPC caches.
         // Behind the in-app Tor this is the common case: Tor sleeps while the app is in the
         // background and reconnects on return, closing every stream the wallet had. While
-        // Tor is still reconnecting the JVM proxy points at the blocked port, so the retry
-        // fails closed here instead of going out directly; the adapter reopens the wallet
-        // on the new SOCKS port once Tor reports Connected.
+        // Tor is still reconnecting the retry fails closed (see reconnect()); the adapter
+        // reopens the wallet on the new SOCKS port once Tor reports Connected.
         Log.w("WalletService", "createTransaction: daemon error, reconnecting and retrying: $error")
+        if (!reconnect()) {
+            throw NodeUnreachableException("Create Transaction failed: node is unreachable ($error)")
+        }
+
+        val retryError = try {
+            build(wallet, txData) ?: return
+        } catch (e: RuntimeException) {
+            throw TransferNotBuiltException(SendResult.Reason.Failed, "Create Transaction failed: ${e.message}")
+        }
+        if (isDaemonError(retryError)) {
+            throw NodeUnreachableException("Create Transaction failed: node is not responding ($retryError)")
+        }
+        throw notBuilt(retryError)
+    }
+
+    // Null when the transaction is built; else the wallet's words for why it is not
+    private fun build(wallet: Wallet, txData: TxData): String? {
         wallet.disposePendingTransaction()
-        wallet.setProxy(currentProxy())
-        if (wallet.connectionStatus != Wallet.ConnectionStatus.ConnectionStatus_Connected) {
-            throw IllegalStateException("Create Transaction failed: node is unreachable ($error)")
-        }
+        txData.createPocketChange(wallet)
 
-        pendingTransaction = wallet.createTransaction(txData)
-        if (pendingTransaction.status !== PendingTransaction.Status.Status_Ok) {
-            val retryError = pendingTransaction.getErrorString()
+        buildingTransfer = true
+        try {
+            val pendingTransaction = wallet.createTransaction(txData)
+            if (pendingTransaction.status === PendingTransaction.Status.Status_Ok) {
+                transferError = null
+                return null
+            }
+
+            val error = pendingTransaction.getErrorString().orEmpty()
+            transferError = error
             wallet.disposePendingTransaction()
-            throw IllegalStateException(
-                if (isDaemonError(retryError)) "Create Transaction failed: node is not responding ($retryError)"
-                else "Create Transaction failed: $retryError"
-            )
+            return error
+        } finally {
+            buildingTransfer = false
         }
     }
 
-    // wallet2 reports a node that stopped answering as an "internal error: Failed to get
-    // ..." (height, fork height, fee estimate, output distribution), a connection loss or
-    // a busy daemon; everything else (bad address, not enough money, tx too big) is final
-    private fun isDaemonError(error: String?): Boolean {
-        val e = error?.lowercase() ?: return false
-        return e.contains("failed to get")
-            || e.contains("failed to connect")
-            || e.contains("connection to daemon")
-            || e.contains("daemon is busy")
-            || e.contains("rpc error")
-    }
+    private fun notBuilt(error: String) = TransferNotBuiltException(
+        if (isInsufficientFunds(error)) SendResult.Reason.InsufficientFunds else SendResult.Reason.Failed,
+        "Create Transaction failed: $error"
+    )
 
-    fun sendTransaction(notes: String?): String {
-        val wallet = wallet ?: throw IllegalStateException("Send Transaction failed: Wallet is NULL")
-
+    /**
+     * Hands the built transaction to the wallet's daemon. It can be called again for the same
+     * transaction after an answer that is not [Broadcast.Taken], also once the wallet has been
+     * moved to another daemon: the wallet keeps the signed transaction until it is taken or
+     * [discardTransaction] drops it, and a daemon that has it already answers that it took it.
+     */
+    internal fun broadcastTransaction(notes: String?): Broadcast {
+        val wallet = wallet ?: return walletClosed()
         val pendingTransaction = wallet.pendingTransaction
-        requireNotNull(pendingTransaction) { "PendingTransaction is null" }
-        if (pendingTransaction.status !== PendingTransaction.Status.Status_Ok) {
-            wallet.disposePendingTransaction()
-            throw IllegalStateException("Send Transaction failed: ${pendingTransaction.getErrorString()}")
-        }
-        val txId = pendingTransaction.getFirstTxId()
-        val success = pendingTransaction.commit("", true)
+            ?: return Broadcast.Refused(Broadcast.Why.Rejected, "Send Transaction failed: no transaction was built")
 
-        if (success) {
+        try {
+            // A broadcast that failed leaves the status at error for good, so it tells
+            // nothing after the first try
+            if (!broadcastTried && pendingTransaction.status !== PendingTransaction.Status.Status_Ok) {
+                return Broadcast.Refused(
+                    Broadcast.Why.Rejected,
+                    "Send Transaction failed: ${pendingTransaction.getErrorString()}"
+                )
+            }
+            if (builtTxId == null) builtTxId = pendingTransaction.getFirstTxIdJ()
+            broadcastTried = true
+
+            // The wallet drops each transaction the daemon took, and commit() goes on
+            // answering false once a try has failed, so none left is what says all are out
+            val taken = pendingTransaction.commit("", true) || pendingTransaction.getTxCount() == 0L
+            if (!taken) return broadcastFailure(pendingTransaction.getErrorString(), builtTxId)
+        } catch (e: RuntimeException) {
+            Log.e("WalletService", "broadcast failed", e)
+            return if (this.wallet == null) walletClosed() else broadcastFailure(e.message, builtTxId)
+        }
+
+        // The transaction is out. Nothing that goes wrong from here on may be reported as a
+        // failed send, which the caller would answer by sending again.
+        val txId = builtTxId.orEmpty()
+        runCatching {
             wallet.disposePendingTransaction()
-            if (!notes.isNullOrEmpty()) {
+            if (!notes.isNullOrEmpty() && txId.isNotEmpty()) {
                 wallet.setUserNote(txId, notes)
             }
             wallet.storeBlocking()
-            listener?.updated = true
-            return txId
-        } else {
-            val error = pendingTransaction.getErrorString()
-            wallet.disposePendingTransaction()
-            throw IllegalStateException("Send Transaction failed: $error")
-        }
+        }.onFailure { Log.e("WalletService", "after the broadcast", it) }
+        listener?.updated = true
+        return Broadcast.Taken(txId)
+    }
+
+    private fun walletClosed() =
+        Broadcast.Refused(Broadcast.Why.WalletClosed, "Send Transaction failed: Wallet is NULL")
+
+    internal fun discardTransaction() {
+        builtTxId = null
+        broadcastTried = false
+        wallet?.disposePendingTransaction()
     }
 }

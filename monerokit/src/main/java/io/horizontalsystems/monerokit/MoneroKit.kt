@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -51,8 +52,10 @@ class MoneroKit(
     private val walletId: String,
     private val walletService: WalletService,
     private val storage: MoneroStorage,
-    private val node: String,
-    private val trustNode: Boolean
+    node: String,
+    trustNode: Boolean,
+    // Other daemons a send may go on through when the wallet's own fails it
+    private val fallbackNodes: () -> List<DaemonNode> = { emptyList() },
 ) : WalletService.Observer {
 
     private val kitId = UUID.randomUUID().toString()
@@ -77,6 +80,21 @@ class MoneroKit(
     val accountsFlow = _accountsFlow.asStateFlow()
 
     private var nodeInfo: NodeInfo? = null
+
+    private val _nodeFlow = MutableStateFlow(DaemonNode(node, trustNode))
+
+    /**
+     * The daemon the wallet syncs from. It changes when [setNode] is called, and when a send
+     * or a fee estimate had to move to one of the fallback daemons.
+     */
+    val nodeFlow: StateFlow<DaemonNode> = _nodeFlow.asStateFlow()
+
+    // Held while the wallet is given a daemon: at start, and for every change after it
+    private val nodeMutex = Mutex()
+
+    // The last start left no open wallet; only another start brings one
+    @Volatile
+    private var startFailed = false
 
     val balance: Balance
         get() = _balanceFlow.value
@@ -133,7 +151,11 @@ class MoneroKit(
         }
     }
 
-    private suspend fun startInternal(): Boolean {
+    private suspend fun startInternal(): Boolean = nodeMutex.withLock {
+        openAndStart().also { startFailed = !it }
+    }
+
+    private suspend fun openAndStart(): Boolean {
         try {
             createWalletIfNotExists()
 
@@ -148,11 +170,8 @@ class MoneroKit(
                 }
             }
 
-            val selectedNode = if (nodeInfo != null) {
-                nodeInfo
-            } else {
-                NodeInfo.fromString(node)
-            }
+            val daemon = _nodeFlow.value
+            val selectedNode = NodeInfo.fromString(daemon.node)
 
             if (selectedNode == null) {
                 _syncStateFlow.update { SyncState.NotSynced(SyncError.InvalidNode("Invalid node")) }
@@ -162,7 +181,7 @@ class MoneroKit(
             nodeInfo = selectedNode
             WalletManager.getInstance().setDaemon(selectedNode)
 
-            val status = walletService.start(wallet, trustNode)
+            val status = walletService.start(wallet, daemon.trusted)
 
             if (status == null || !status.isOk) {
                 _syncStateFlow.update { SyncState.NotSynced(SyncError.StartError(status?.toString() ?: "Wallet is NULL")) }
@@ -202,17 +221,105 @@ class MoneroKit(
         walletService.requestSave()
     }
 
-    fun send(
+    /**
+     * Sends, and says how it ended. A daemon that fails the send is dealt with here: see
+     * [SendFlow]. Blocks for seconds on decoy fetching and signing, and for longer on a daemon
+     * that does not answer.
+     */
+    suspend fun send(
         amount: Long,
         address: String,
         memo: String?,
         selectedOutputs: List<String>? = null,
         accountIndex: Int = 0
-    ): String {
-        val txData = buildTxData(amount, address, memo, selectedOutputs, accountIndex)
+    ): SendResult = withContext(Dispatchers.IO) {
+        val txData = try {
+            buildTxData(amount, address, memo, selectedOutputs, accountIndex)
+        } catch (e: IllegalStateException) {
+            // only a closed wallet is reported this way
+            return@withContext SendResult.NotSent(SendResult.Reason.WalletClosed, e.message)
+        } catch (e: IllegalArgumentException) {
+            return@withContext SendResult.NotSent(SendResult.Reason.Failed, e.message)
+        }
 
-        walletService.createTransaction(txData)
-        return walletService.sendTransaction(memo)
+        walletService.duringSend {
+            SendFlow(
+                build = { walletService.createTransaction(txData) },
+                broadcast = { walletService.broadcastTransaction(memo) },
+                discard = walletService::discardTransaction,
+                currentDaemon = { _nodeFlow.value },
+                otherDaemonsThatAnswer = ::otherDaemonsThatAnswer,
+                moveTo = ::moveForSend,
+            ).run()
+        }
+    }
+
+    /**
+     * Moves the wallet to another daemon. An open wallet stays open and goes on from the
+     * height it has. A wallet that cannot take the daemon that way is closed and opened again
+     * on it, as is one whose last start failed.
+     */
+    suspend fun setNode(node: String, trustNode: Boolean) = withContext(Dispatchers.IO) {
+        val target = DaemonNode(node, trustNode)
+        val reopen = nodeMutex.withLock {
+            val current = _nodeFlow.value
+            if (target == current) return@withLock false
+
+            val info = NodeInfo.fromString(node)
+            if (info == null) {
+                Log.e("MoneroKit", "setNode: not a node: ${target.node.substringAfter('@')}")
+                return@withLock false
+            }
+
+            val change = if (target.node == current.node) {
+                walletService.setTrustedDaemon(trustNode)
+                WalletService.DaemonChange.Moved
+            } else {
+                walletService.changeDaemon(info, trustNode)
+            }
+            _nodeFlow.value = target
+            nodeInfo = info
+            Log.i("MoneroKit", "setNode: ${info.name} -> $change")
+
+            when (change) {
+                WalletService.DaemonChange.Moved -> false
+                WalletService.DaemonChange.NoWallet -> startFailed
+                WalletService.DaemonChange.NeedsReopen -> true
+            }
+        }
+        if (reopen) {
+            lifecycleScope.launch {
+                if (started) {
+                    _stop()
+                    _start()
+                }
+            }
+        }
+    }
+
+    // For a send in progress: the wallet has to be on the daemon when this returns, so a
+    // daemon it could only be reopened on is passed over
+    private suspend fun moveForSend(target: DaemonNode): Boolean = nodeMutex.withLock {
+        if (target.node != _nodeFlow.value.node) {
+            val info = NodeInfo.fromString(target.node) ?: return@withLock false
+            if (walletService.changeDaemon(info, target.trusted) != WalletService.DaemonChange.Moved) {
+                return@withLock false
+            }
+            _nodeFlow.value = target
+            nodeInfo = info
+        }
+        walletService.reconnect().also { Log.i("MoneroKit", "send: on ${nodeInfo?.name}, answers: $it") }
+    }
+
+    // The other daemons the kit may use that are ready for a wallet, fastest first
+    private suspend fun otherDaemonsThatAnswer(): List<DaemonNode> {
+        val current = _nodeFlow.value.node
+        val others = fallbackNodes().filter { it.node != current }.associateBy { it.node }
+        if (others.isEmpty()) return emptyList()
+
+        val walletHeight = walletService.wallet?.blockChainHeight ?: 0L
+        return daemonsReadyForSend(pingNodes(context, others.keys.toList()), walletHeight)
+            .mapNotNull { others[it] }
     }
 
     fun getUnspentOutputs(accountIndex: Int = 0): List<MoneroOutput> {
@@ -285,16 +392,25 @@ class MoneroKit(
         storage.updateAccounts(accounts)
     }
 
-    fun estimateFee(
+    /**
+     * The fee for a transfer, worked out from what the daemon tells the wallet. When the daemon
+     * fails the wallet moves to a fallback daemon that answers and asks that one.
+     */
+    suspend fun estimateFee(
         amount: Long,
         address: String,
         memo: String?,
         accountIndex: Int = 0
-    ): Long {
-        val wallet = walletService.wallet ?: throw IllegalStateException("Wallet is NULL")
+    ): Long = withContext(Dispatchers.IO) {
         val txData = buildTxData(amount, address, memo, accountIndex = accountIndex)
 
-        return wallet.estimateTransactionFee(txData)
+        try {
+            walletService.duringSend {
+                DaemonFailover(::otherDaemonsThatAnswer, ::moveForSend).run { walletService.estimateFee(txData) }
+            }
+        } catch (e: NodeUnreachableException) {
+            throw e.cause ?: IllegalStateException(e.message)
+        }
     }
 
     fun getSubaddresses(): List<Subaddress> {
@@ -543,7 +659,7 @@ class MoneroKit(
     fun statusInfo(): Map<String, Any> {
         val statusInfo = LinkedHashMap<String, Any>()
 
-        statusInfo["Node"] = nodeInfo?.name?.let { "$it (${if (trustNode) "trusted" else "untrusted"})" } ?: "NULL"
+        statusInfo["Node"] = nodeInfo?.name?.let { "$it (${if (_nodeFlow.value.trusted) "trusted" else "untrusted"})" } ?: "NULL"
         statusInfo["Wallet Status"] = walletService.wallet?.status ?: "NULL"
         statusInfo["Sync State"] = _syncStateFlow.value.description
         statusInfo["Last Block Height"] = lastBlockHeight ?: 0L
@@ -575,9 +691,10 @@ class MoneroKit(
             restoreDateOrHeight: String,
             walletId: String,
             node: String,
-            trustNode: Boolean
+            trustNode: Boolean,
+            fallbackNodes: () -> List<DaemonNode> = { emptyList() },
         ): MoneroKit {
-            return getInstance(context, seed.toElectrum(), restoreDateOrHeight, walletId, node, trustNode)
+            return getInstance(context, seed.toElectrum(), restoreDateOrHeight, walletId, node, trustNode, fallbackNodes)
         }
 
         fun getInstance(
@@ -586,7 +703,10 @@ class MoneroKit(
             restoreDateOrHeight: String,
             walletId: String,
             node: String,
-            trustNode: Boolean
+            trustNode: Boolean,
+            // Other daemons a send may go on through when the wallet's own fails it. Asked at
+            // the time of the send. Empty keeps every transfer on the daemon the wallet is on.
+            fallbackNodes: () -> List<DaemonNode> = { emptyList() },
         ): MoneroKit {
             val walletService = WalletService(context)
             val restoreHeight = getHeight(restoreDateOrHeight)
@@ -595,7 +715,7 @@ class MoneroKit(
 
             NetCipherHelper.createInstance(context)
 
-            return MoneroKit(context, seed, restoreHeight, walletId, walletService, storage, node, trustNode)
+            return MoneroKit(context, seed, restoreHeight, walletId, walletService, storage, node, trustNode, fallbackNodes)
         }
 
         fun validateAddress(address: String) {

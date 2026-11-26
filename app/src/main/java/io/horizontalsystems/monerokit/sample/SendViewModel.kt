@@ -3,6 +3,7 @@ package io.horizontalsystems.monerokit.sample
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.horizontalsystems.monerokit.MoneroKit
+import io.horizontalsystems.monerokit.SendResult
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -183,16 +184,20 @@ class SendViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                kit.send(
+                val result = kit.send(
                     amount = amountLong,
                     address = address,
                     memo = _uiState.value.memoString.ifBlank { null }
                 )
                 _uiState.update {
-                    it.copy(
-                        isSending = false,
-                        sendSuccess = true,
-                    )
+                    when (result) {
+                        is SendResult.Sent -> it.copy(isSending = false, sendSuccess = true)
+                        is SendResult.NotSent -> it.copy(isSending = false, sendError = "Not sent: ${result.message}")
+                        is SendResult.Unknown -> it.copy(
+                            isSending = false,
+                            sendError = "May have been sent, check the history before sending again: ${result.message}"
+                        )
+                    }
                 }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isSending = false, sendError = "Send failed: ${e.message}") }
