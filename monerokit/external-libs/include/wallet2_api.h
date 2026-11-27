@@ -578,6 +578,15 @@ struct Wallet
     virtual void stop() = 0;
 
     /*!
+     * \brief interruptDaemon - makes the daemon request in flight fail and return, and every
+     *        later one fail at once, until init() gives the wallet a daemon again. It waits for
+     *        nothing, so it gets through while a request the daemon never answers holds the
+     *        locks init() and close() need. Callable from any thread, not during close().
+     * \return false when the wallet's connection cannot be interrupted
+     */
+    virtual bool interruptDaemon() = 0;
+
+    /*!
      * \brief store - stores wallet to file.
      * \param path - main filename to store wallet to. additionally stores address file and keys file.
      *               to store to the same file - just pass empty string;
