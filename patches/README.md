@@ -49,13 +49,14 @@ Apply in numeric order on top of upstream `85f036ba7`.
 | `0009-epee-reset-http-client-state-after-receive-exception.patch` | Reset the receive state machine when receiving throws |
 | `0010-epee-bound-and-reset-chunked-response-cache.patch` | Cap chunked-transfer metadata and reset the chunked cache between responses |
 
-0011–0013 are this kit's own changes.
+0011–0014 are this kit's own changes.
 
 | File | Description |
 |------|-------------|
 | `0011-Add-generateKey-and-generateAddress.patch` | Adds `Wallet::generateKey` and `Wallet::generateAddress` static functions to `src/wallet/api/wallet.cpp` and `wallet2_api.h` — derives keys and addresses from a mnemonic without opening a wallet file |
 | `0012-Add-storeBlocking-thread-safe-store.patch` | Adds `Wallet::storeBlocking`, a `store` that takes the refresh mutex so it cannot run concurrently with a refresh |
 | `0013-Unwrap-chacha_key-before-hex-formatting-it-in-device.patch` | Hex-format `crypto::chacha_key` in `device_sidekick.cpp` through its underlying array, since `epee::as_byte_span` now rejects non-trivially-copyable types |
+| `0014-Add-interruptDaemon-to-leave-a-daemon-that-does-not-.patch` | Adds `Wallet::interruptDaemon`, which makes the daemon request in flight fail without taking a lock, and every later one until `init()` gives the wallet a daemon again. The epee HTTP client's one-way `shutdown()` gets a counterpart that can be undone (`interrupt()` / `resume()`). It changes epee headers, so `libepee.a`, `libnet.a`, `libcommon.a`, `libwallet.a` and `libwallet_api.a` all change with it |
 
 ## How to apply
 
@@ -75,7 +76,7 @@ git clone https://github.com/monero-project/monero.git external-libs/monero
 git -C external-libs/monero checkout 85f036ba7
 git -C external-libs/monero submodule update --init --recursive
 
-# Apply the thirteen monero patches in order
+# Apply the fourteen monero patches in order
 git -C external-libs/monero am ../../../patches/monero/00*.patch
 
 # Build

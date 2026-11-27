@@ -1198,6 +1198,18 @@ Java_io_horizontalsystems_monerokit_model_Wallet_stopSync(JNIEnv *env, jobject i
     JNI_CATCH_VOID
 }
 
+// Wallet::stop() is only seen between two daemon requests. Wallet::interruptDaemon()
+// makes the one in flight fail, and every later one until init() is called again. It
+// takes none of the wallet's locks, so it gets through while a request the daemon never
+// answers holds the ones init() and close() wait for.
+JNIEXPORT jboolean JNICALL
+Java_io_horizontalsystems_monerokit_model_Wallet_interruptDaemon(JNIEnv *env, jobject instance) {
+    JNI_TRY
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    return static_cast<jboolean>(wallet->interruptDaemon());
+    JNI_CATCH_RET(0)
+}
+
 JNIEXPORT jboolean JNICALL
 Java_io_horizontalsystems_monerokit_model_Wallet_refresh(JNIEnv *env, jobject instance) {
     JNI_TRY

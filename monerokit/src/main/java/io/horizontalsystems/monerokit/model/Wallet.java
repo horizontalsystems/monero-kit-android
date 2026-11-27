@@ -390,6 +390,19 @@ public class Wallet {
      */
     public native void stopSync();
 
+    /**
+     * Makes the daemon request in flight fail and return, and every later one fail at once,
+     * until {@link #init(long, String)} gives the wallet a daemon again. It takes no lock in
+     * the native layer, so it gets through while a request the daemon never answers holds
+     * the ones init() and close() wait for.
+     *
+     * NOT synchronized, for the same reason. The caller keeps the wallet from being closed
+     * while this runs.
+     *
+     * @return false when the wallet's connection cannot be interrupted.
+     */
+    public native boolean interruptDaemon();
+
     public native void startRefresh();
 
     public native void pauseRefresh();

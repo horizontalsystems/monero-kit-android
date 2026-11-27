@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- the wallet opens its daemon connections in native code, also to the test's own daemons -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+</manifest>
