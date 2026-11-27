@@ -49,6 +49,24 @@ class WalletService(private val context: Context) {
 
     private val sendsInProgress = AtomicInteger()
 
+    // start() asks the daemon while it holds the monitor, so what lets go of it comes without
+    // the monitor. This lock is what keeps the wallet open under that call instead
+    private val startLock = Any()
+    private var starts = 0
+
+    // The number of the start that is asking its daemon, 0 when none is
+    private var startAsking = 0
+
+    /** Whether the last start was let go of by [cutStartShort]. It left no open wallet. */
+    @Volatile
+    var startCutShort = false
+        private set
+
+    // True while changeDaemon() has the wallet's daemon requests fail. A sync round that ends
+    // then failed by the kit's doing, not the daemon's
+    @Volatile
+    private var daemonRequestsCut = false
+
     /**
      * Runs a send or a fee estimate. While one runs, a failed sync round is not reported: the
      * call moves the wallet off a daemon that fails, and the next round tells where it stands.
@@ -82,17 +100,48 @@ class WalletService(private val context: Context) {
         running = true
         this.wallet = wallet
 
-        initWallet(wallet, trustNode)
+        synchronized(startLock) {
+            startCutShort = false
+            startAsking = ++starts
+        }
+        val walletStatus = try {
+            initWallet(wallet, trustNode)
+            wallet.fullStatus
+        } finally {
+            // the wallet may be closed from here on, so no cutStartShort() gets to it any more
+            synchronized(startLock) { startAsking = 0 }
+        }
 
-        val walletStatus = wallet.fullStatus
-
-        if (!walletStatus.isOk) {
+        // One that came after the daemon had answered still stands: who cut it goes on as
+        // if no wallet were open
+        if (startCutShort || !walletStatus.isOk) {
             stop()
             return walletStatus
         }
 
         listener = MyWalletListener().apply { start() }
         return walletStatus
+    }
+
+    /** The start that is asking its daemon now, if one is. */
+    internal fun startAskingDaemon(): Int? = synchronized(startLock) { startAsking.takeIf { it != 0 } }
+
+    /**
+     * Lets go of a start that waits for its daemon: it ends as a failed one and leaves no
+     * open wallet. A daemon that takes the start's request and never answers it keeps
+     * start(), and with it the monitor, until the request times out minutes later.
+     *
+     * Not synchronized, for that reason. init() lets daemon requests through again, so a
+     * call that comes before it is lost: the caller repeats it for as long as it is true.
+     *
+     * @param start what [startAskingDaemon] gave.
+     * @return whether that start is still asking its daemon.
+     */
+    internal fun cutStartShort(start: Int): Boolean = synchronized(startLock) {
+        if (startAsking != start) return false
+        startCutShort = true
+        wallet?.interruptDaemon()
+        true
     }
 
     fun requestSave() {
@@ -104,6 +153,11 @@ class WalletService(private val context: Context) {
         setObserver(null)
         listener?.stop()    // pauseRefresh() (no new iterations); listener freed later in close()
         wallet?.stopSync()  // interrupt the in-flight refresh so it releases the lock fast
+        // stopSync() is only seen between two daemon requests. A request the daemon never
+        // answers holds the refresh lock until it times out, minutes later, and the save
+        // and the close below would wait for it. This makes it fail now. The wallet is
+        // still open here, and nothing closes it but this method.
+        wallet?.interruptDaemon()
         if (pendingSave.getAndSet(false)) {
             // storeBlocking() acquires the native refresh lock — now free since the
             // refresh was interrupted — so the save never races refresh mutation.
@@ -160,6 +214,13 @@ class WalletService(private val context: Context) {
      * Moves the open wallet to another daemon. The wallet keeps what it has synced and goes on
      * from there; nothing is closed. This is the call the wallet was initialised with at start,
      * made again with the new address, between two refreshes.
+     *
+     * It does not wait for the daemon being left. A request that daemon never answers holds
+     * the wallet's daemon locks until it times out, three and a half minutes later, and
+     * init() takes those locks. So the wallet's daemon requests are made to fail first: the
+     * one in flight, and whatever is asked until init() has set the new daemon. A send or a
+     * fee estimate that was waiting on the daemon being left sees it as a connection that
+     * dropped, which it already answers by moving on.
      */
     @Synchronized
     internal fun changeDaemon(node: NodeInfo, trustNode: Boolean): DaemonChange {
@@ -173,12 +234,17 @@ class WalletService(private val context: Context) {
         wallet.pauseRefresh()
         try {
             WalletManager.getInstance().setDaemon(node)
+            // init() is what lets the requests through again, so nothing that can fail
+            // comes between the two
+            daemonRequestsCut = true
+            wallet.interruptDaemon()
             if (!wallet.init(0, currentProxy())) return DaemonChange.NeedsReopen
             wallet.setTrustedDaemon(trustNode)
         } catch (e: RuntimeException) {
             Log.e("WalletService", "changeDaemon failed", e)
             return DaemonChange.NeedsReopen
         } finally {
+            daemonRequestsCut = false
             wallet.startRefresh()
         }
 
@@ -313,14 +379,23 @@ class WalletService(private val context: Context) {
         override fun refreshed() {
             val wallet = wallet ?: return
 
+            // A round that ends while changeDaemon() has the daemon requests fail was cut short
+            // by it and says nothing about the daemon the wallet is on now. Reading the status
+            // asks the daemon, which would keep this thread until the change is over and make
+            // it miss the call that starts the next round, the one that tells where the
+            // wallet stands
+            if (daemonRequestsCut) return
+
             val walletStatus = wallet.fullStatus
+            // the change may have begun while the status was read
+            val cutShort = daemonRequestsCut
             if (!walletStatus.isOk) {
                 val about = statusError(
                     walletStatus.errorString, buildingTransfer, transferError, sendsInProgress.get() > 0
                 )
                 when (about) {
                     StatusError.OfTheSync -> {
-                        observer?.onRefreshed(wallet, walletStatus, false)
+                        if (!cutShort) observer?.onRefreshed(wallet, walletStatus, false)
                         return
                     }
                     StatusError.HeldBack -> return

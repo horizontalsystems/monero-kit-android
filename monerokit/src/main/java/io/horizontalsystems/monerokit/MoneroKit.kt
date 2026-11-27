@@ -106,7 +106,18 @@ class MoneroKit(
             null
 
     fun start() { lifecycleScope.launch { _start() } }
-    fun stop()  { lifecycleScope.launch { _stop() } }
+    fun stop() {
+        // A start that waits for its daemon keeps the thread the stop runs on
+        walletService.startAskingDaemon()?.let { start ->
+            lifecycleScope.launch(Dispatchers.IO) { cutStartShort(start) }
+        }
+        lifecycleScope.launch { _stop() }
+    }
+
+    // init() lets daemon requests through again, so this goes on until the start has let go
+    private suspend fun cutStartShort(start: Int) {
+        while (walletService.cutStartShort(start)) delay(20)
+    }
 
     private suspend fun _start() {
         if (started) return
@@ -182,6 +193,10 @@ class MoneroKit(
             WalletManager.getInstance().setDaemon(selectedNode)
 
             val status = walletService.start(wallet, daemon.trusted)
+
+            // setNode() or stop() let go of a start that waited for its daemon. No wallet is
+            // open; what happens next is theirs to say
+            if (walletService.startCutShort) return false
 
             if (status == null || !status.isOk) {
                 _syncStateFlow.update { SyncState.NotSynced(SyncError.StartError(status?.toString() ?: "Wallet is NULL")) }
@@ -261,11 +276,18 @@ class MoneroKit(
      */
     suspend fun setNode(node: String, trustNode: Boolean) = withContext(Dispatchers.IO) {
         val target = DaemonNode(node, trustNode)
+        val info = NodeInfo.fromString(node)
+
+        // A start that waits for the node being left holds nodeMutex for as long as it waits.
+        // Cut short it leaves no open wallet, and the wallet is opened on the new node below
+        if (info != null && target.node != _nodeFlow.value.node) {
+            walletService.startAskingDaemon()?.let { cutStartShort(it) }
+        }
+
         val reopen = nodeMutex.withLock {
             val current = _nodeFlow.value
             if (target == current) return@withLock false
 
-            val info = NodeInfo.fromString(node)
             if (info == null) {
                 Log.e("MoneroKit", "setNode: not a node: ${target.node.substringAfter('@')}")
                 return@withLock false
