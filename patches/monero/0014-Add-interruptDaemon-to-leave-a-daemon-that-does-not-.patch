@@ -1,0 +1,219 @@
+From 14a5f526d8abe987d65438e380fddd999d5ec0a9 Mon Sep 17 00:00:00 2001
+From: chyngyz <chyngyz.omurov@gmail.com>
+Date: Fri, 27 Nov 2026 10:12:43 +0600
+Subject: [PATCH] Add interruptDaemon to leave a daemon that does not answer
+
+A daemon request that is never answered holds the http client lock and
+the daemon rpc mutex until it times out, three and a half minutes
+later. Until then init() cannot give the wallet another daemon and
+close() cannot end the refresh thread.
+
+The http client can already abort the call in flight from another
+thread, with shutdown(), but for good: it is made for tearing the
+wallet down. interrupt() does the same and resume() undoes it.
+wallet2::interrupt_daemon() interrupts, set_daemon() resumes, and
+Wallet::interruptDaemon() makes it reachable from the wallet API.
+---
+ .../epee/include/net/abstract_http_client.h   |  2 +
+ contrib/epee/include/net/http_client.h        | 11 +++++
+ contrib/epee/include/net/net_helper.h         | 47 ++++++++++++++-----
+ src/wallet/api/wallet.cpp                     |  5 ++
+ src/wallet/api/wallet.h                       |  1 +
+ src/wallet/api/wallet2_api.h                  |  9 ++++
+ src/wallet/wallet2.cpp                        |  1 +
+ src/wallet/wallet2.h                          |  3 ++
+ 8 files changed, 68 insertions(+), 11 deletions(-)
+
+diff --git a/contrib/epee/include/net/abstract_http_client.h b/contrib/epee/include/net/abstract_http_client.h
+index 6c45638..ba7fae2 100644
+--- a/contrib/epee/include/net/abstract_http_client.h
++++ b/contrib/epee/include/net/abstract_http_client.h
+@@ -70,6 +70,8 @@ namespace http
+     virtual bool connect(std::chrono::milliseconds timeout) = 0;
+     virtual bool disconnect() = 0;
+     virtual bool shutdown() { return disconnect(); } // tear down: the client need not be usable afterwards; overrides should interrupt blocked calls and be callable from another thread (the default plain disconnect() gives neither guarantee)
++    virtual bool interrupt() { return false; } // shutdown() that is not final: overrides make the call in flight fail, and every later one, until resume(); callable from another thread. False where it is not supported
++    virtual void resume() {} // ends interrupt()
+     virtual bool is_connected(bool *ssl = NULL) = 0;
+     virtual bool invoke(const boost::string_ref uri, const boost::string_ref method, const boost::string_ref body, std::chrono::milliseconds timeout, const http_response_info** ppresponse_info = NULL, const fields_list& additional_params = fields_list()) = 0;
+     virtual bool invoke_get(const boost::string_ref uri, std::chrono::milliseconds timeout, const std::string& body = std::string(), const http_response_info** ppresponse_info = NULL, const fields_list& additional_params = fields_list()) = 0;
+diff --git a/contrib/epee/include/net/http_client.h b/contrib/epee/include/net/http_client.h
+index d688bf9..678ee49 100644
+--- a/contrib/epee/include/net/http_client.h
++++ b/contrib/epee/include/net/http_client.h
+@@ -213,6 +213,17 @@ namespace net_utils
+ 				return m_net_client.shutdown(); // no m_lock; interrupts an invoke blocked while holding it
+ 			}
+ 			//---------------------------------------------------------------------------
++			bool interrupt() override
++			{
++				return m_net_client.interrupt(); // no m_lock, as shutdown()
++			}
++			//---------------------------------------------------------------------------
++			void resume() override
++			{
++				CRITICAL_REGION_LOCAL(m_lock); // not while a call is working out why it failed
++				m_net_client.resume();
++			}
++			//---------------------------------------------------------------------------
+ 			bool is_connected(bool *ssl = NULL) override
+ 			{
+ 				CRITICAL_REGION_LOCAL(m_lock);
+diff --git a/contrib/epee/include/net/net_helper.h b/contrib/epee/include/net/net_helper.h
+index 49f3ecc..d5572ae 100644
+--- a/contrib/epee/include/net/net_helper.h
++++ b/contrib/epee/include/net/net_helper.h
+@@ -123,6 +123,7 @@ namespace net_utils
+ 				m_wake_writer(-1),
+ #endif
+ 				m_aborted(false),
++				m_interrupted(false),
+ 				m_bytes_sent(0),
+ 				m_bytes_received(0)
+ 		{
+@@ -728,18 +729,26 @@ namespace net_utils
+ 			// write(); a blocked call closes the socket on abort, an idle client's closes at destruction
+ 			m_aborted = true;
+ 			m_connected = false;
+-#ifdef BOOST_ASIO_HAS_POSIX_STREAM_DESCRIPTOR
+-			// construction guarantees the pipe exists
+-			const int saved_errno = errno;
+-			const char wake = 0;
+-			while (::write(m_wake_writer, &wake, 1) == -1 && errno == EINTR) {}
+-			errno = saved_errno; // a full pipe already holds a pending wake
+-#else
+-			// Windows console handlers run on their own thread: post() a wake
+-			boost::asio::post(m_io_service, []{});
+-#endif
++			wake();
++			return true;
++		}
++
++		// shutdown() that is not final: the call in flight fails, and so does every
++		// later one, until resume(). Callable from any thread, as shutdown() is
++		bool interrupt()
++		{
++			m_interrupted = true;
++			m_connected = false;
++			wake();
+ 			return true;
+ 		}
++
++		// Ends interrupt(). Not while a call is in flight: one that was failing would
++		// take what it was made to give up for the server's doing
++		void resume()
++		{
++			m_interrupted = false;
++		}
+ 		
+ 		boost::asio::io_context& get_io_service()
+ 		{
+@@ -772,7 +781,21 @@ namespace net_utils
+ 
+ 		bool shutdown_requested() const
+ 		{
+-			return m_aborted.load();
++			return m_aborted.load() || m_interrupted.load();
++		}
++
++		void wake()
++		{
++#ifdef BOOST_ASIO_HAS_POSIX_STREAM_DESCRIPTOR
++			// construction guarantees the pipe exists
++			const int saved_errno = errno;
++			const char wake = 0;
++			while (::write(m_wake_writer, &wake, 1) == -1 && errno == EINTR) {}
++			errno = saved_errno; // a full pipe already holds a pending wake
++#else
++			// Windows console handlers run on their own thread: post() a wake
++			boost::asio::post(m_io_service, []{});
++#endif
+ 		}
+ 
+ #ifdef BOOST_ASIO_HAS_POSIX_STREAM_DESCRIPTOR
+@@ -903,6 +926,8 @@ namespace net_utils
+ #endif
+ 		// sticky: set once by shutdown(), never cleared; the client is being torn down
+ 		std::atomic<bool> m_aborted;
++		// set by interrupt(), cleared by resume()
++		std::atomic<bool> m_interrupted;
+ 		std::atomic<uint64_t> m_bytes_sent;
+ 		std::atomic<uint64_t> m_bytes_received;
+ 	};
+diff --git a/src/wallet/api/wallet.cpp b/src/wallet/api/wallet.cpp
+index 5bd1e33..ff7f8d3 100644
+--- a/src/wallet/api/wallet.cpp
++++ b/src/wallet/api/wallet.cpp
+@@ -1128,6 +1128,11 @@ void WalletImpl::stop()
+     m_wallet->stop();
+ }
+ 
++bool WalletImpl::interruptDaemon()
++{
++    return m_wallet->interrupt_daemon();
++}
++
+ bool WalletImpl::store(const std::string &path)
+ {
+     clearStatus();
+diff --git a/src/wallet/api/wallet.h b/src/wallet/api/wallet.h
+index bc5a23c..eeda1fa 100644
+--- a/src/wallet/api/wallet.h
++++ b/src/wallet/api/wallet.h
+@@ -102,6 +102,7 @@ public:
+     std::string publicMultisigSignerKey() const override;
+     std::string path() const override;
+     void stop() override;
++    bool interruptDaemon() override;
+     bool store(const std::string &path) override;
+     bool storeBlocking(const std::string &path) override;
+     std::string filename() const override;
+diff --git a/src/wallet/api/wallet2_api.h b/src/wallet/api/wallet2_api.h
+index 650f3f9..307288e 100644
+--- a/src/wallet/api/wallet2_api.h
++++ b/src/wallet/api/wallet2_api.h
+@@ -577,6 +577,15 @@ struct Wallet
+      */
+     virtual void stop() = 0;
+ 
++    /*!
++     * \brief interruptDaemon - makes the daemon request in flight fail and return, and every
++     *        later one fail at once, until init() gives the wallet a daemon again. It waits for
++     *        nothing, so it gets through while a request the daemon never answers holds the
++     *        locks init() and close() need. Callable from any thread, not during close().
++     * \return false when the wallet's connection cannot be interrupted
++     */
++    virtual bool interruptDaemon() = 0;
++
+     /*!
+      * \brief store - stores wallet to file.
+      * \param path - main filename to store wallet to. additionally stores address file and keys file.
+diff --git a/src/wallet/wallet2.cpp b/src/wallet/wallet2.cpp
+index af28090..6a6aa9e 100644
+--- a/src/wallet/wallet2.cpp
++++ b/src/wallet/wallet2.cpp
+@@ -1397,6 +1397,7 @@ bool wallet2::set_daemon(std::string daemon_address, boost::optional<epee::net_u
+ 
+   if(m_http_client->is_connected())
+     m_http_client->disconnect();
++  m_http_client->resume(); // ends interrupt_daemon(), whether or not the daemon gets set
+   CHECK_AND_ASSERT_MES2(m_proxy.empty() || proxy.empty() , "It is not possible to set global proxy (--proxy) and daemon specific proxy together.");
+   if(m_proxy.empty())
+     CHECK_AND_ASSERT_MES(set_proxy(proxy), false, "failed to set proxy address");
+diff --git a/src/wallet/wallet2.h b/src/wallet/wallet2.h
+index 9624745..8057cbb 100644
+--- a/src/wallet/wallet2.h
++++ b/src/wallet/wallet2.h
+@@ -1087,6 +1087,9 @@ private:
+     void stop() { m_run.store(false, std::memory_order_relaxed); m_message_store.stop(); }
+     // teardown-only: a permanent stop that also aborts an in-flight daemon request
+     void shutdown() { m_stopped.store(true, std::memory_order_relaxed); stop(); m_http_client->shutdown(); }
++    // makes the daemon request in flight fail, and every later one, until set_daemon() is
++    // called again. Takes no lock, so it gets through to a request that holds them
++    bool interrupt_daemon() { return m_http_client->interrupt(); }
+ 
+     i_wallet2_callback* callback() const { return m_callback; }
+     void callback(i_wallet2_callback* callback) { m_callback = callback; }
+-- 
+2.50.1 (Apple Git-155)
+
